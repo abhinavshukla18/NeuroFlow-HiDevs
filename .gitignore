@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Node
+node_modules/
+npm-debug.log*
+.next/
+dist/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Databases and local stores
+*.db
+*.sqlite3
+chroma/
+
+# Experiment tracking
+mlruns/
+
+# OS and editor
+.DS_Store
+.vscode/
+.idea/
