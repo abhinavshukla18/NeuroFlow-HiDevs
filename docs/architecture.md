@@ -154,6 +154,73 @@ The retrieved chunk IDs are also saved with the query record, so the Evaluation 
 
 ## 4. Generation Subsystem
 
+**Purpose:** Take the ranked context window from retrieval, build a prompt, route the request to the most suitable LLM, stream the answer to the client token by token, and log the full input and output for evaluation.
+
+### 4.1 Generation Pipeline
+
+```mermaid
+flowchart TD
+    A["Ranked context window from Retrieval"] --> B["Prompt assembler: system prompt + context + question + history"]
+    B --> C["Model router: cost tier, capability, domain"]
+    C --> D["Selected LLM"]
+    D --> E["Token stream"]
+    E --> F["SSE stream to client: GET /query/id/stream"]
+    E --> G["Full response collected"]
+    G --> H["Generation log written to Postgres"]
+    H --> I["Evaluation job queued"]
+```
+
+### 4.2 Stage Descriptions
+
+| Stage | What happens | Why |
+|---|---|---|
+| Prompt assembler | Builds the final prompt from a system prompt, the retrieved chunks (labelled with citation IDs), the conversation history, and the user's question. | The model must answer from the provided context and be able to cite it. |
+| Model router | Chooses which LLM handles the request (see 4.3). | Balances cost, speed, and quality instead of using one model for everything. |
+| LLM call | The prompt is sent to the selected model with streaming turned on. | Streaming lets the user start reading right away. |
+| SSE stream | Tokens are forwarded to the client over Server-Sent Events as they arrive. | Much lower perceived latency than waiting for the full answer. |
+| Response collector | The tokens are also collected into the full response in the background. | The complete answer is needed for logging and evaluation. |
+| Generation log | The full input and output are written to Postgres (see 4.4). | Evaluation and fine-tuning both depend on this record. |
+| Evaluation job | A job is pushed to the queue once the response is complete. | Scoring happens asynchronously so the user never waits for it. |
+
+### 4.3 Model Routing
+
+The router picks a model using four signals:
+
+| Signal | Example |
+|---|---|
+| Cost tier | Simple questions go to a cheaper model, complex ones to a stronger model. |
+| Capability | Long context needs a model with a large context window. Image content needs a vision model. |
+| Domain | Code or technical questions may go to a model that is stronger at those. |
+| Fine-tuned model | If a fine-tuned model has been shown to beat the base model on similar queries, it is chosen (see the Fine-Tuning Subsystem). |
+
+If the chosen model fails or times out, the router falls back to the next model in its list. The full routing matrix will be designed in ADR 004 (the optional extra ADR).
+
+### 4.4 What Is Logged
+
+For every generation, one record is saved:
+
+| Field | Purpose |
+|---|---|
+| `query_id` | Links the record to the query |
+| `prompt` | The exact prompt sent to the model |
+| `retrieved_chunk_ids` | Which chunks were in the context |
+| `model_used` | Which model answered |
+| `response` | The full answer |
+| `input_tokens`, `output_tokens` | Cost tracking |
+| `latency_ms` | Speed tracking, including time to first token |
+| `created_at` | Timestamp |
+
+### 4.5 Edge Cases
+
+- **Empty context from retrieval:** the prompt tells the model to say it could not find relevant information, and the router uses the cheapest tier, since no reasoning over documents is needed.
+- **Context too large for the model:** the context window builder drops the lowest-ranked chunks until the prompt fits the model's token limit.
+- **Model fails mid-stream:** the stream sends an error event to the client, the partial response is logged with status `failed`, and the router's fallback model can be used if the client retries.
+- **Client disconnects early:** the generation still finishes in the background, so the full response is logged and evaluated.
+
+**Output of this subsystem:** a streamed answer to the client, plus a complete generation log record that feeds the Evaluation Subsystem.
+
+
+
 ## 5. Evaluation Subsystem
 
 ## 6. Fine-Tuning Subsystem
