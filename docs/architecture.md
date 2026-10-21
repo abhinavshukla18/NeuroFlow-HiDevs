@@ -299,3 +299,79 @@ Aggregates are refreshed after each batch of evaluations and stored, so `GET /ev
 
 
 ## 6. Fine-Tuning Subsystem
+
+**Purpose:** Turn the best past generations into training data, submit fine-tuning jobs, track each experiment in MLflow, and route future similar queries to the fine-tuned model only when it outperforms the base model.
+
+### 6.1 Fine-Tuning Pipeline
+
+```mermaid
+flowchart TD
+    A["Evaluation log in Postgres"] --> B["Pair extractor: faithfulness > 0.8 AND user_rating >= 4"]
+    B --> C["Deduplicate and clean"]
+    C --> D["JSONL formatter: prompt/completion pairs"]
+    D --> E["Training dataset saved and versioned"]
+    E --> F["Submit fine-tuning job"]
+    F --> G["Track run in MLflow: parameters, dataset version, metrics"]
+    G --> H["Fine-tuned model ready"]
+    H --> I["Compare against base model on held-out evaluation set"]
+    I --> J{"Fine-tuned model better?"}
+    J -->|Yes| K["Register model and update the router"]
+    J -->|No| L["Keep base model, log result"]
+    K --> M["Future similar queries routed to fine-tuned model"]
+```
+
+### 6.2 Stage Descriptions
+
+| Stage | What happens | Why |
+|---|---|---|
+| Pair extractor | Selects generations from the evaluation log where faithfulness > 0.8 AND user rating >= 4. | Only answers that were grounded in the context and also liked by the user are worth learning from. |
+| Deduplicate and clean | Removes duplicate or near-duplicate pairs and drops malformed records. | Duplicates make the model overfit to repeated examples. |
+| JSONL formatter | Writes each pair as one JSON line in the format the fine-tuning provider expects. | JSONL is the standard training data format. |
+| Dataset versioning | Each dataset is saved with a version ID and a record of how it was selected. | Any model can be traced back to the exact data it was trained on. |
+| Submit job | The dataset is uploaded and a fine-tuning job is created (via `POST /finetune/jobs`). | Training runs on the provider's side, so the job is tracked by ID. |
+| MLflow tracking | Each run logs its parameters, dataset version, and resulting metrics. | Lets experiments be compared and reproduced. |
+| Comparison | The fine-tuned model and the base model both answer the same held-out set of queries, and both are scored by the Evaluation Subsystem. | A fine-tuned model is only used if it measurably beats the base model. |
+| Router update | If the fine-tuned model wins, it is registered with the Model Router. | Future similar queries then go to it automatically. |
+
+### 6.3 Example Training Record
+
+One line of the JSONL file (shown over several lines here for readability):
+
+```json
+{
+  "messages": [
+    {"role": "system", "content": "Answer using only the provided context."},
+    {"role": "user", "content": "Context: ...retrieved chunks...\n\nQuestion: What is the refund window?"},
+    {"role": "assistant", "content": "The refund window is 30 days from purchase."}
+  ]
+}
+```
+
+The prompt includes the retrieved context, so the model learns to answer from context and not from memory.
+
+### 6.4 Routing to the Fine-Tuned Model
+
+A fine-tuned model is not used for everything. It is only chosen when a new query is similar to the kind of queries it was trained and tested on.
+
+1. Each fine-tuned model is registered with a short description of its training domain, for example the embedding centroid of its training queries.
+2. When a query arrives, the Model Router compares the query embedding to that domain.
+3. If the query is similar enough, and the fine-tuned model's evaluation scores beat the base model's on that domain, the query goes to the fine-tuned model.
+4. Otherwise it goes to the base model as usual.
+
+This keeps a narrow fine-tuned model from handling queries it was never trained for.
+
+### 6.5 Job Lifecycle
+
+A fine-tuning job moves through these statuses, which are returned by `GET /finetune/jobs/{id}`:
+
+`queued` → `preparing_data` → `training` → `evaluating` → `completed` (or `failed` at any step)
+
+### 6.6 Edge Cases
+
+- **Too few qualifying pairs:** a job is not started until the dataset reaches a minimum size, since training on a handful of examples is unreliable.
+- **Training data drift:** each dataset records the date range it covers, so old data can be dropped if the documents or users change.
+- **Fine-tuned model gets worse over time:** the Evaluation Subsystem keeps scoring its answers, and the router goes back to the base model if its rolling scores fall below the base model's.
+- **Judge bias leaking in:** because training pairs are selected by LLM-judged scores, a biased judge could shape the model. The user rating requirement and the human-label checks in ADR 003 help guard against this.
+
+**Output of this subsystem:** a versioned training dataset, a tracked MLflow experiment, and, only when it wins the comparison, a fine-tuned model registered with the router.
+
