@@ -74,6 +74,84 @@ Every chunk is stored with metadata so that retrieval can filter and cite source
 
 ## 3. Retrieval Subsystem
 
+**Purpose:** Given a user query, find the most relevant chunks using several search methods at once, combine the results, rerank them, and return a ranked context window for the Generation Subsystem.
+
+### 3.1 Full Retrieval Pipeline
+
+```mermaid
+flowchart TD
+    A["Client: POST /query"] --> B["Query preprocessing: clean text, extract filters"]
+    B --> C["Embed the query"]
+    B --> D["Keyword query"]
+    B --> E["Metadata filters"]
+    C --> F["Vector similarity search (pgvector)"]
+    D --> G["Keyword search (Postgres full-text)"]
+    E --> H["Metadata filtering"]
+    F --> I["Reciprocal Rank Fusion (RRF)"]
+    G --> I
+    H --> I
+    I --> J["Top candidates, e.g. 50"]
+    J --> K["Cross-encoder reranker"]
+    K --> L["Top-k chunks, e.g. 8"]
+    L --> M["Context window builder: fit token budget, keep order, attach citations"]
+    M --> N["Ranked context window to Generation Subsystem"]
+```
+
+### 3.2 Stage Descriptions
+
+| Stage | What happens | Why |
+|---|---|---|
+| Query preprocessing | The query text is cleaned, and any filters it implies (file type, date range) are extracted. | Clean input gives better search, and filters narrow the search space. |
+| Query embedding | The query is converted to a vector with the same embedding model used at ingestion. | Query and chunk vectors must come from the same model to be comparable. |
+| Vector search | pgvector returns the chunks whose vectors are closest to the query vector. | Finds chunks that match in meaning, even with different wording. |
+| Keyword search | Postgres full-text search returns chunks that contain the query terms. | Finds exact matches such as names, IDs, and rare terms that embeddings can miss. |
+| Metadata filtering | Chunks are restricted by fields such as `source_type` or `created_at`. | Lets users scope a query, for example "only PDFs from this year". |
+| Reciprocal Rank Fusion | The ranked lists are merged into one list (see 3.3). | Combines different search methods without needing to compare their raw scores. |
+| Cross-encoder reranker | A model reads the query and each candidate chunk together and scores how relevant the pair is. | More accurate than vector search, but too slow to run on every chunk, so it only runs on the top candidates. |
+| Context window builder | The top chunks are trimmed to fit the LLM's token budget, kept in a sensible order, and tagged with citation info. | The output must fit the model's context limit and let the answer cite its sources. |
+
+The three searches run in parallel, so total latency is set by the slowest one, not the sum of all three.
+
+### 3.3 Reciprocal Rank Fusion (RRF)
+
+Vector scores and keyword scores are on different scales, so they can't be added directly. RRF avoids this by using only each chunk's **rank** in each list:
+
+```
+RRF_score(chunk) = sum over all lists of 1 / (k + rank_in_that_list)
+```
+
+`k` is a constant, usually 60, that stops the top ranks from dominating.
+
+**Example:**
+
+- Chunk A is rank 1 in vector search and rank 3 in keyword search: 1/61 + 1/63 ≈ 0.0323
+- Chunk B is rank 2 in vector search and missing from keyword search: 1/62 ≈ 0.0161
+
+Chunk A wins because both methods agree it is relevant. Chunks are then sorted by RRF score and the top candidates go to the reranker.
+
+### 3.4 Inputs and Outputs
+
+**Input:** a query string, plus optional filters (source type, date range, document IDs) and a pipeline configuration (how many candidates and top-k chunks to use).
+
+**Output:** a ranked context window, which is a list of chunks, each containing:
+
+| Field | Purpose |
+|---|---|
+| `chunk_id` and `text` | The content to put in the prompt |
+| `source_name` and `page_or_row` | Citation information |
+| `rerank_score` | How relevant the reranker judged the chunk |
+| `rank` | Position in the final ordering |
+
+The retrieved chunk IDs are also saved with the query record, so the Evaluation Subsystem can later measure context precision and context recall.
+
+### 3.5 Edge Cases
+
+- **No relevant chunks found:** if every reranker score is below a minimum threshold, the subsystem returns an empty context. The Generation Subsystem then tells the user it could not find relevant information, instead of letting the LLM guess.
+- **One search method fails or times out:** the pipeline continues with the remaining methods, and the failure is logged.
+- **Filters match nothing:** the subsystem returns an empty context and reports that the filters were too narrow.
+
+
+
 ## 4. Generation Subsystem
 
 ## 5. Evaluation Subsystem
