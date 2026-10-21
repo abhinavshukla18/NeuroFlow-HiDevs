@@ -223,4 +223,79 @@ For every generation, one record is saved:
 
 ## 5. Evaluation Subsystem
 
+**Purpose:** Asynchronously score every generation on four quality metrics, store the scores in Postgres, and compute rolling aggregates so quality can be tracked over time. Scoring never blocks the user's response.
+
+### 5.1 Evaluation Pipeline
+
+```mermaid
+flowchart TD
+    A["Evaluation job from queue"] --> B["Evaluation worker loads query, context chunks, and response from Postgres"]
+    B --> C["Faithfulness judge"]
+    B --> D["Answer relevance judge"]
+    B --> E["Context precision judge"]
+    B --> F["Context recall judge"]
+    C --> G["Scores combined"]
+    D --> G
+    E --> G
+    F --> G
+    G --> H["Write scores to evaluations table in Postgres"]
+    H --> I["Update rolling aggregates"]
+    I --> J["GET /evaluations and GET /evaluations/aggregate"]
+```
+
+### 5.2 The Four Metrics
+
+Each metric is scored from 0.0 (worst) to 1.0 (best) by an LLM judge.
+
+| Metric | Question it answers | How it is scored |
+|---|---|---|
+| Faithfulness | Are the claims in the answer grounded in the retrieved context? | The judge splits the answer into individual claims and checks each one against the context. Score = supported claims / total claims. |
+| Answer relevance | Does the answer actually address the question? | The judge rates how directly and completely the answer responds to the user's question. |
+| Context precision | Are the retrieved chunks actually used? | The judge checks which retrieved chunks were needed for the answer. Score = useful chunks / retrieved chunks. High precision means little noise in the context. |
+| Context recall | Were the relevant chunks retrieved? | The judge checks whether the context contained the information needed to answer fully. Score = needed information found in the context / total information needed. |
+
+**What each low score points to:**
+
+| Low score | Likely problem |
+|---|---|
+| Faithfulness | The model is hallucinating or ignoring the context (generation problem). |
+| Answer relevance | The model misread the question or went off-topic (prompt or model problem). |
+| Context precision | Retrieval returns too much irrelevant material (reranker or top-k problem). |
+| Context recall | Retrieval is missing relevant chunks (chunking, embedding, or search problem). |
+
+Faithfulness and answer relevance judge the generation. Context precision and context recall judge the retrieval.
+
+### 5.3 Score Storage
+
+One row per generation is written to the `evaluations` table in Postgres:
+
+| Field | Purpose |
+|---|---|
+| `evaluation_id` | Unique ID |
+| `query_id` | Links to the generation log |
+| `faithfulness`, `answer_relevance`, `context_precision`, `context_recall` | The four scores (0.0 to 1.0) |
+| `judge_model` | Which model produced the scores |
+| `user_rating` | Optional 1 to 5 rating from the user, added later if given |
+| `evaluated_at` | Timestamp |
+
+The `user_rating` field matters because the Fine-Tuning Subsystem selects training examples using both faithfulness and the user's rating.
+
+### 5.4 Rolling Aggregates
+
+Aggregates are computed over moving time windows (last 1 hour, 24 hours, and 7 days) and can be grouped by model, pipeline, or source type.
+
+| Aggregate | Purpose |
+|---|---|
+| Mean of each metric | Overall quality trend |
+| 5th percentile of each metric | Shows the worst cases, which an average hides |
+| Count of evaluations | Shows how much data each number is based on |
+
+Aggregates are refreshed after each batch of evaluations and stored, so `GET /evaluations/aggregate` returns instantly instead of recalculating from raw rows.
+
+### 5.5 Edge Cases
+
+- **Judge call fails:** the job is retried a limited number of times, then marked `failed` without affecting the user's answer.
+- **Empty context:** context precision and recall are skipped, since there are no
+
+
 ## 6. Fine-Tuning Subsystem
