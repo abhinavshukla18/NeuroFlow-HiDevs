@@ -288,3 +288,53 @@ CREATE TABLE api_keys (
 
 `queries.api_key_id` and `conversations.api_key_id` refer to this table. This is how the API enforces that one key cannot read another key's queries.
 
+## 6. How the Tables Relate
+
+```mermaid
+erDiagram
+    api_keys ||--o{ queries : makes
+    api_keys ||--o{ conversations : owns
+    pipelines ||--o{ documents : processes
+    pipelines ||--o{ queries : configures
+    pipelines ||--o{ pipeline_runs : records
+    documents ||--o{ chunks : contains
+    conversations ||--o{ queries : groups
+    queries ||--o| evaluations : "scored by"
+```
+
+| Relationship | Meaning |
+|---|---|
+| `documents` to `chunks` | One document has many chunks. Deleting a document deletes its chunks. |
+| `queries` to `evaluations` | Each query has at most one evaluation. |
+| `pipelines` to `documents`, `queries`, `pipeline_runs` | A pipeline is the configuration used by many ingestions and queries, and its history is kept in `pipeline_runs`. |
+| `conversations` to `queries` | A conversation groups several queries so earlier turns can be put in the prompt. |
+| `api_keys` to `queries`, `conversations` | Ownership. This is how one key is prevented from reading another key's data. |
+
+**Tables with no declared foreign keys:**
+
+| Table | Why |
+|---|---|
+| `evaluation_aggregates` | It is derived data, rebuilt from `evaluations`. |
+| `finetune_jobs` | It points to its training data by file (`dataset_path`) and to its source generations by selection criteria, not by row. |
+
+### 6.1 Table Creation Order
+
+Because of the foreign keys, the tables must be created in this order:
+
+1. `api_keys`
+2. `pipelines`
+3. `documents`, `conversations`
+4. `chunks`, `queries`
+5. `evaluations`, `pipeline_runs`
+6. `evaluation_aggregates`, `finetune_jobs`
+
+### 6.2 Which Subsystem Uses Which Table
+
+| Subsystem | Reads | Writes |
+|---|---|---|
+| Ingestion | `pipelines` | `documents`, `chunks`, `pipeline_runs` |
+| Retrieval | `chunks`, `pipelines` | none (the retrieved chunk IDs are saved by Generation) |
+| Generation | `chunks`, `conversations`, `finetune_jobs` | `queries`, `pipeline_runs` |
+| Evaluation | `queries`, `chunks` | `evaluations`, `evaluation_aggregates` |
+| Fine-Tuning | `evaluations`, `queries` | `finetune_jobs` |
+
