@@ -502,3 +502,338 @@ The response returns the full saved configuration with all defaults filled in, p
 | 422 | `invalid_config_value` | A number is outside its allowed range, or `chunk_overlap_tokens` is not smaller than `chunk_size_tokens`. |
 | 422 | `unknown_embedding_model` | The embedding model is not available. |
 
+### 2.7 GET /pipelines/{id}/runs
+
+Return the execution history of a pipeline, newest first. A run is one use of the pipeline: either an ingestion job (a document processed with it) or a query (a question answered with it).
+
+| | |
+|---|---|
+| **Method and path** | `GET /api/v1/pipelines/{id}/runs` |
+| **Authentication** | API key |
+| **Rate limit** | 120 requests per minute |
+
+**Path parameter:**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `id` | string (UUID) | The `pipeline_id` returned by `POST /pipelines`. |
+
+**Query parameters:**
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `page` | integer | No | Page number, starting at 1. Default 1. |
+| `page_size` | integer | No | Items per page, 1 to 100. Default 20. |
+| `run_type` | string | No | `ingestion` or `query`. Both if omitted. |
+| `status` | string | No | `queued`, `processing`, `completed`, or `failed`. |
+| `from` | string | No | Only runs started after this timestamp. |
+| `to` | string | No | Only runs started before this timestamp. |
+
+**Example request:**
+
+```
+GET /api/v1/pipelines/3f9c2a52-7a1e-4d9b-9c55-1d2f0f6b8a10/runs?run_type=query&page=1
+```
+
+**Success response: 200 OK**
+
+```json
+{
+  "pipeline_id": "3f9c2a52-7a1e-4d9b-9c55-1d2f0f6b8a10",
+  "items": [
+    {
+      "run_id": "a1b2c3d4-0000-4000-8000-000000000042",
+      "run_type": "query",
+      "reference_id": "9a8b7c6d-1111-4222-8333-444455556666",
+      "status": "completed",
+      "started_at": "2026-10-21T10:31:00Z",
+      "finished_at": "2026-10-21T10:31:03Z",
+      "duration_ms": 3050,
+      "stage_timings_ms": {
+        "retrieval": 640,
+        "generation": 2410
+      },
+      "error": null
+    }
+  ],
+  "page": 1,
+  "page_size": 20,
+  "total_items": 57,
+  "total_pages": 3
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `pipeline_id` | string (UUID) | The pipeline these runs belong to. |
+| `items[].run_id` | string (UUID) | ID of the run. |
+| `items[].run_type` | string | `ingestion` or `query`. |
+| `items[].reference_id` | string (UUID) | The `document_id` for an ingestion run, or the `query_id` for a query run. |
+| `items[].status` | string | `queued`, `processing`, `completed`, or `failed`. |
+| `items[].started_at` | string | Timestamp. |
+| `items[].finished_at` | string or null | Timestamp, or `null` if still running. |
+| `items[].duration_ms` | integer or null | Total time, or `null` if still running. |
+| `items[].stage_timings_ms` | object | Time spent in each stage. Ingestion runs report `extraction`, `chunking`, `embedding`, and `vector_write`. Query runs report `retrieval` and `generation`. |
+| `items[].error` | object or null | Error `code` and `message` if the run failed, otherwise `null`. |
+| `page`, `page_size`, `total_items`, `total_pages` | integer | Pagination, as in `GET /evaluations`. |
+
+**Errors** (in addition to the common errors in section 1.4):
+
+| HTTP status | `code` | Meaning |
+|---|---|---|
+| 404 | `pipeline_not_found` | No pipeline exists with this ID. |
+| 422 | `invalid_pagination` | `page` or `page_size` is out of range. |
+| 422 | `invalid_filter` | `run_type` or `status` is not an allowed value. |
+| 422 | `invalid_date_range` | `from` is later than `to`. |
+
+### 2.8 POST /finetune/jobs
+
+Submit a fine-tuning job. The system selects training pairs from the evaluation log, builds a versioned JSONL dataset, submits the job, and tracks it in MLflow (see the Fine-Tuning Subsystem in `architecture.md`). The request returns right away and the job runs in the background.
+
+| | |
+|---|---|
+| **Method and path** | `POST /api/v1/finetune/jobs` |
+| **Authentication** | Admin |
+| **Rate limit** | 5 requests per minute |
+
+**Request body:**
+
+```json
+{
+  "base_model": "balanced-tier-model",
+  "name": "refund-policy-ft-v1",
+  "selection": {
+    "min_faithfulness": 0.8,
+    "min_user_rating": 4,
+    "from": "2026-09-01T00:00:00Z",
+    "to": "2026-10-20T23:59:59Z",
+    "pipeline_id": "3f9c2a52-7a1e-4d9b-9c55-1d2f0f6b8a10",
+    "max_examples": 5000
+  },
+  "hyperparameters": {
+    "epochs": 3,
+    "learning_rate_multiplier": 1.0,
+    "batch_size": 8
+  },
+  "validation_split": 0.1
+}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `base_model` | string | Yes | The model to fine-tune. |
+| `name` | string | Yes | A readable name for the job and its MLflow experiment. 1 to 100 characters. |
+| `selection.min_faithfulness` | number | No | Default 0.8. Pairs must score strictly above this. |
+| `selection.min_user_rating` | integer | No | Default 4. Pairs must have a rating at or above this. |
+| `selection.from`, `selection.to` | string | No | Restrict the date range of source generations. |
+| `selection.pipeline_id` | string (UUID) | No | Restrict to generations from one pipeline. |
+| `selection.max_examples` | integer | No | Cap on dataset size. Default 5000. |
+| `hyperparameters.epochs` | integer | No | 1 to 10. Default 3. |
+| `hyperparameters.learning_rate_multiplier` | number | No | Default 1.0. |
+| `hyperparameters.batch_size` | integer | No | Default 8. |
+| `validation_split` | number | No | Fraction of pairs held out for validation, 0.05 to 0.3. Default 0.1. |
+
+The faithfulness and rating defaults match the selection rule in the architecture (faithfulness > 0.8 AND rating >= 4). The caller can only make the rule stricter, never looser than these defaults.
+
+**Success response: 202 Accepted**
+
+```json
+{
+  "job_id": "f0e1d2c3-0000-4000-8000-0000000000aa",
+  "name": "refund-policy-ft-v1",
+  "base_model": "balanced-tier-model",
+  "status": "queued",
+  "dataset_version": null,
+  "mlflow_run_id": null,
+  "created_at": "2026-10-21T11:30:00Z"
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `job_id` | string (UUID) | ID used with `GET /finetune/jobs/{id}`. |
+| `name`, `base_model` | string | Echo of the request. |
+| `status` | string | Always `queued` on creation. |
+| `dataset_version` | string or null | Filled in once the dataset is built. |
+| `mlflow_run_id` | string or null | Filled in once tracking starts. |
+| `created_at` | string | Timestamp. |
+
+**Errors** (in addition to the common errors in section 1.4):
+
+| HTTP status | `code` | Meaning |
+|---|---|---|
+| 404 | `base_model_not_found` | The base model is not available for fine-tuning. |
+| 409 | `job_name_exists` | A job with this name already exists. |
+| 409 | `job_already_running` | A fine-tuning job is already running for this base model. |
+| 422 | `insufficient_training_data` | Fewer qualifying pairs exist than the minimum required. The response `details` field reports how many were found. |
+| 422 | `invalid_selection` | A selection value is invalid, for example `min_faithfulness` below 0.8 or `from` later than `to`. |
+| 422 | `invalid_hyperparameters` | A hyperparameter is outside its allowed range. |
+
+### 2.9 GET /finetune/jobs/{id}
+
+Return the status and metrics of a fine-tuning job (see Job Lifecycle in the Fine-Tuning Subsystem in `architecture.md`).
+
+| | |
+|---|---|
+| **Method and path** | `GET /api/v1/finetune/jobs/{id}` |
+| **Authentication** | Admin |
+| **Rate limit** | 60 requests per minute |
+
+**Path parameter:**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `id` | string (UUID) | The `job_id` returned by `POST /finetune/jobs`. |
+
+**Success response: 200 OK**
+
+```json
+{
+  "job_id": "f0e1d2c3-0000-4000-8000-0000000000aa",
+  "name": "refund-policy-ft-v1",
+  "base_model": "balanced-tier-model",
+  "fine_tuned_model": "ft:balanced-tier-model:refund-policy-ft-v1",
+  "status": "completed",
+  "dataset": {
+    "version": "ds-2026-10-21-001",
+    "training_examples": 1840,
+    "validation_examples": 204,
+    "selection_criteria": {"min_faithfulness": 0.8, "min_user_rating": 4}
+  },
+  "training_metrics": {
+    "training_loss": 0.41,
+    "validation_loss": 0.47
+  },
+  "comparison": {
+    "eval_set_size": 150,
+    "base_model_scores": {"faithfulness": 0.86, "answer_relevance": 0.89},
+    "fine_tuned_scores": {"faithfulness": 0.91, "answer_relevance": 0.92},
+    "fine_tuned_is_better": true
+  },
+  "routing_enabled": true,
+  "mlflow_run_id": "8c1f0a9e5d7b4e2fa3b6",
+  "mlflow_url": "https://mlflow.example.com/#/experiments/3/runs/8c1f0a9e5d7b4e2fa3b6",
+  "error": null,
+  "created_at": "2026-10-21T11:30:00Z",
+  "updated_at": "2026-10-21T14:05:00Z"
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `job_id`, `name`, `base_model` | | As in `POST /finetune/jobs`. |
+| `fine_tuned_model` | string or null | Name of the resulting model. `null` until training finishes. |
+| `status` | string | `queued`, `preparing_data`, `training`, `evaluating`, `completed`, or `failed`. |
+| `dataset` | object or null | Details of the training data. `null` while `queued`. |
+| `dataset.version` | string | The dataset version, so the model can be traced to its exact data. |
+| `dataset.training_examples`, `dataset.validation_examples` | integer | Number of pairs in each split. |
+| `dataset.selection_criteria` | object | The thresholds used to select pairs. |
+| `training_metrics` | object or null | Loss values. `null` until training has produced metrics. |
+| `comparison` | object or null | Results of comparing the fine-tuned model against the base model on a held-out set. `null` until the `evaluating` stage finishes. |
+| `comparison.fine_tuned_is_better` | boolean | Whether the fine-tuned model beat the base model. This decides whether it is registered with the router. |
+| `routing_enabled` | boolean | `true` only when the fine-tuned model won the comparison and was registered with the Model Router. |
+| `mlflow_run_id`, `mlflow_url` | string or null | Link to the tracked experiment run. |
+| `error` | object or null | Error `code` and `message` if the job failed. |
+| `created_at`, `updated_at` | string | Timestamps. |
+
+**Errors** (in addition to the common errors in section 1.4):
+
+| HTTP status | `code` | Meaning |
+|---|---|---|
+| 404 | `job_not_found` | No fine-tuning job exists with this ID. |
+
+### 2.10 GET /health
+
+Report whether the system and its dependencies are working. Used by load balancers and uptime monitors.
+
+| | |
+|---|---|
+| **Method and path** | `GET /api/v1/health` |
+| **Authentication** | Public |
+| **Rate limit** | 120 requests per minute per IP address |
+
+**Success response: 200 OK** (all critical dependencies are working)
+
+```json
+{
+  "status": "healthy",
+  "version": "1.0.0",
+  "uptime_seconds": 86400,
+  "checked_at": "2026-10-21T12:00:00Z",
+  "dependencies": {
+    "postgres": {"status": "up", "latency_ms": 4},
+    "redis": {"status": "up", "latency_ms": 1},
+    "llm_provider": {"status": "up", "latency_ms": 180},
+    "mlflow": {"status": "up", "latency_ms": 12}
+  }
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `status` | string | `healthy`, `degraded`, or `unhealthy`. |
+| `version` | string | Version of the running application. |
+| `uptime_seconds` | integer | Seconds since the service started. |
+| `checked_at` | string | Timestamp. |
+| `dependencies` | object | One entry per dependency, each with `status` (`up` or `down`) and `latency_ms`. |
+
+**Status meanings:**
+
+| `status` | Meaning | HTTP status |
+|---|---|---|
+| `healthy` | All dependencies are up. | 200 |
+| `degraded` | A non-critical dependency (for example MLflow) is down. The system still serves queries. | 200 |
+| `unhealthy` | A critical dependency (Postgres, Redis, or every LLM provider) is down. | 503 |
+
+**Errors:**
+
+| HTTP status | `code` | Meaning |
+|---|---|---|
+| 503 | `service_unavailable` | The status is `unhealthy`. The body has the same shape as the success response, so the failing dependency can be seen. |
+
+### 2.11 GET /metrics
+
+Expose operational metrics in Prometheus text format, so a monitoring system can scrape them. These are system metrics (traffic, latency, queues). They are separate from the answer-quality metrics in `GET /evaluations/aggregate`.
+
+| | |
+|---|---|
+| **Method and path** | `GET /api/v1/metrics` |
+| **Authentication** | Admin |
+| **Rate limit** | 30 requests per minute |
+
+**Success response: 200 OK** (`Content-Type: text/plain; version=0.0.4`)
+
+```
+# HELP neuroflow_http_requests_total Total HTTP requests
+# TYPE neuroflow_http_requests_total counter
+neuroflow_http_requests_total{endpoint="/query",status="202"} 1523
+
+# HELP neuroflow_query_latency_seconds End-to-end query latency
+# TYPE neuroflow_query_latency_seconds histogram
+neuroflow_query_latency_seconds_bucket{le="1.0"} 410
+neuroflow_query_latency_seconds_bucket{le="5.0"} 1480
+
+# HELP neuroflow_ingestion_queue_depth Ingestion jobs waiting in the queue
+# TYPE neuroflow_ingestion_queue_depth gauge
+neuroflow_ingestion_queue_depth 3
+```
+
+| Metric | Type | Description |
+|---|---|---|
+| `neuroflow_http_requests_total` | counter | Requests, labelled by endpoint and status. |
+| `neuroflow_query_latency_seconds` | histogram | Time from query to completed answer. |
+| `neuroflow_time_to_first_token_seconds` | histogram | Time until the first streamed token. |
+| `neuroflow_retrieval_latency_seconds` | histogram | Time spent in the retrieval pipeline. |
+| `neuroflow_tokens_total` | counter | Input and output tokens, labelled by model. |
+| `neuroflow_ingestion_queue_depth` | gauge | Ingestion jobs waiting. |
+| `neuroflow_evaluation_queue_depth` | gauge | Evaluation jobs waiting. |
+| `neuroflow_ingestion_jobs_total` | counter | Ingestion jobs, labelled by final status. |
+| `neuroflow_errors_total` | counter | Errors, labelled by error `code`. |
+
+**Errors** (common errors in section 1.4 only):
+
+| HTTP status | `code` | Meaning |
+|---|---|---|
+| 401 | `unauthorized` | The API key is missing or invalid. |
+| 403 | `forbidden` | The key does not have admin permission. |
+
