@@ -837,3 +837,91 @@ neuroflow_ingestion_queue_depth 3
 | 401 | `unauthorized` | The API key is missing or invalid. |
 | 403 | `forbidden` | The key does not have admin permission. |
 
+## 3. Supporting Endpoints
+
+These are not in the minimum list, but the architecture depends on them.
+
+### 3.1 GET /documents/{id}
+
+Return the processing status of an ingested document. Clients poll this after `POST /ingest` until the status is `ready`.
+
+| | |
+|---|---|
+| **Method and path** | `GET /api/v1/documents/{id}` |
+| **Authentication** | API key |
+| **Rate limit** | 120 requests per minute |
+
+**Path parameter:** `id` (UUID) is the `document_id` returned by `POST /ingest`.
+
+**Success response: 200 OK**
+
+```json
+{
+  "document_id": "b7e1c0de-5a3f-4b1e-8d52-0c9a7f3e1d44",
+  "source_type": "pdf",
+  "source_name": "report.pdf",
+  "status": "ready",
+  "chunk_count": 86,
+  "pipeline_id": "3f9c2a52-7a1e-4d9b-9c55-1d2f0f6b8a10",
+  "error": null,
+  "created_at": "2026-10-21T10:30:00Z",
+  "updated_at": "2026-10-21T10:30:42Z"
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `status` | string | `queued`, `processing`, `ready`, or `failed`. |
+| `chunk_count` | integer or null | Number of chunks stored. `null` until the document is `ready`. |
+| `error` | object or null | Error `code` and `message` if the status is `failed`. |
+
+**Errors** (in addition to the common errors in section 1.4):
+
+| HTTP status | `code` | Meaning |
+|---|---|---|
+| 404 | `document_not_found` | No document exists with this ID. |
+
+### 3.2 POST /query/{query_id}/rating
+
+Let a user rate an answer from 1 to 5. The rating is saved on the evaluation record and is one of the two signals the Fine-Tuning Subsystem uses to select training pairs.
+
+| | |
+|---|---|
+| **Method and path** | `POST /api/v1/query/{query_id}/rating` |
+| **Authentication** | API key |
+| **Rate limit** | 60 requests per minute |
+
+**Request body:**
+
+```json
+{
+  "rating": 5,
+  "comment": "Accurate and clear"
+}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `rating` | integer | Yes | 1 (worst) to 5 (best). |
+| `comment` | string | No | Free-text feedback, up to 1000 characters. |
+
+**Success response: 200 OK**
+
+```json
+{
+  "query_id": "9a8b7c6d-1111-4222-8333-444455556666",
+  "rating": 5,
+  "rated_at": "2026-10-21T10:35:00Z"
+}
+```
+
+A second rating on the same query replaces the first.
+
+**Errors** (in addition to the common errors in section 1.4):
+
+| HTTP status | `code` | Meaning |
+|---|---|---|
+| 404 | `query_not_found` | No query exists with this ID, or it belongs to another API key. |
+| 409 | `generation_not_complete` | The answer is still being generated, so it cannot be rated yet. |
+| 422 | `invalid_rating` | The rating is not an integer from 1 to 5. |
+
