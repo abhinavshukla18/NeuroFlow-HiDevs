@@ -193,7 +193,7 @@ The router picks a model using four signals:
 | Domain | Code or technical questions may go to a model that is stronger at those. |
 | Fine-tuned model | If a fine-tuned model has been shown to beat the base model on similar queries, it is chosen (see the Fine-Tuning Subsystem). |
 
-If the chosen model fails or times out, the router falls back to the next model in its list. The full routing matrix will be designed in ADR 004 (the optional extra ADR).
+If the chosen model fails or times out, the router falls back to the next model in its list.
 
 ### 4.4 What Is Logged
 
