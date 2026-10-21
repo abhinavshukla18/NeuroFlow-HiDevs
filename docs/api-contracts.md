@@ -1,5 +1,27 @@
 # NeuroFlow API Contracts
 
+## Endpoint Summary
+
+All paths are under the base URL `/api/v1`.
+
+| # | Method | Path | Purpose | Auth | Rate limit (per min) |
+|---|---|---|---|---|---|
+| 2.1 | POST | `/ingest` | Submit a file or URL for ingestion | API key | 20 |
+| 2.2 | POST | `/query` | Run a RAG query | API key | 60 |
+| 2.3 | GET | `/query/{query_id}/stream` | Stream the answer over SSE | API key | 60 |
+| 2.4 | GET | `/evaluations` | Paginated evaluation results | API key | 120 |
+| 2.5 | GET | `/evaluations/aggregate` | Rolling quality metrics | API key | 60 |
+| 2.6 | POST | `/pipelines` | Create a named pipeline configuration | API key | 10 |
+| 2.7 | GET | `/pipelines/{id}/runs` | Pipeline execution history | API key | 120 |
+| 2.8 | POST | `/finetune/jobs` | Submit a fine-tuning job | Admin | 5 |
+| 2.9 | GET | `/finetune/jobs/{id}` | Fine-tuning job status and metrics | Admin | 60 |
+| 2.10 | GET | `/health` | System and dependency health | Public | 120 |
+| 2.11 | GET | `/metrics` | Operational metrics (Prometheus format) | Admin | 30 |
+| 3.1 | GET | `/documents/{id}` | Document processing status | API key | 120 |
+| 3.2 | POST | `/query/{query_id}/rating` | Submit a 1 to 5 rating for an answer | API key | 60 |
+
+Rows 2.1 to 2.11 are the required endpoints. Rows 3.1 and 3.2 are supporting endpoints the architecture depends on.
+
 ## 1. Conventions
 
 **Base URL:** `/api/v1`
