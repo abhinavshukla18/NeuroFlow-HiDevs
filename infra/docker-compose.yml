@@ -50,6 +50,8 @@ services:
       mlflow:
         condition: service_healthy
     env_file: ../.env
+    volumes:
+      - ./init:/app/init:ro
 
   worker:
     build: ../backend
@@ -60,10 +62,6 @@ services:
       redis:
         condition: service_healthy
     env_file: ../.env
-
-    env_file: ../.env
-    volumes:
-      - ./init:/app/init:ro
 
   jaeger:
     image: jaegertracing/all-in-one:latest
