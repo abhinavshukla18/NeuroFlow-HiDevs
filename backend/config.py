@@ -51,6 +51,10 @@ class Settings(BaseSettings):
         3.0, gt=0, description="Timeout for each dependency check in /health."
     )
 
+    schema_file: str = Field(
+        "/app/init/001_schema.sql", description="Path to the schema SQL file inside the container."
+    )
+
     @property
     def postgres_dsn(self) -> str:
         """Connection string for the main database. Credentials are URL-encoded."""
