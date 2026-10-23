@@ -9,3 +9,5 @@ opentelemetry-api>=1.28
 opentelemetry-sdk>=1.28
 opentelemetry-exporter-otlp-proto-grpc>=1.28
 opentelemetry-instrumentation-asgi>=0.49b0
+openai>=1.50
+anthropic>=0.40
