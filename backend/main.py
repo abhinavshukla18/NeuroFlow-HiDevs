@@ -12,6 +12,10 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from prometheus_client import CONTENT_TYPE_LATEST, Gauge, generate_latest
+from arq import create_pool
+from arq.connections import RedisSettings
+
+from api import ingest
 
 from config import get_settings
 from db import health, migrations, pool
@@ -42,11 +46,17 @@ setup_tracing()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
+    settings = get_settings()
     await pool.create_pool()
     applied = await migrations.apply_schema()
+    app.state.arq = await create_pool(
+        RedisSettings(host=settings.redis_host, port=settings.redis_port, password=settings.redis_password),
+        default_queue_name="queue:ingest",
+    )
     logger.info("Startup complete (schema applied now: %s)", applied)
     yield
     # Shutdown
+    await app.state.arq.aclose()
     await pool.close_pool()
     trace.get_tracer_provider().shutdown()
     logger.info("Shutdown complete")
@@ -54,6 +64,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="NeuroFlow API", version="0.1.0", lifespan=lifespan)
 app.add_middleware(OpenTelemetryMiddleware)
+app.include_router(ingest.router)
 
 
 @app.get("/health")
