@@ -21,3 +21,4 @@ pandas>=2.2
 trafilatura>=2.0
 tiktoken>=0.8
 Pillow>=11.0
+fastembed>=0.4

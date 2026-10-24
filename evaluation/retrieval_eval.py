@@ -83,8 +83,8 @@ async def main():
     report = {
         "num_queries": len(ENTRIES),
         "k": K,
-        "embeddings": "fake (random vectors)" if settings.fake_embeddings else "real",
-        "reranker_active": bool(settings.openai_api_key or settings.anthropic_api_key),
+        "embeddings": "local fastembed bge-small (zero-padded to 1536)" if settings.local_models else ("fake (random vectors)" if settings.fake_embeddings else "real"),
+        "reranker_active": bool(settings.local_models or settings.openai_api_key or settings.anthropic_api_key),
         "results": results,
         "thresholds": {"hit_rate": 0.75, "mrr": 0.55},
         "passed": best["hit_rate"] > 0.75 and best["mrr"] > 0.55,

@@ -44,7 +44,10 @@ class Settings(BaseSettings):
     fake_embeddings: bool = Field(
         False, description="Dev only: use deterministic fake vectors instead of calling an embedding API."
     )
-
+    local_models: bool = Field(
+        False, description="Use local ONNX models (fastembed) for embeddings and reranking."
+    )
+    
     # --- OpenTelemetry / Jaeger ---
     otel_exporter_otlp_endpoint: str = Field(
         "http://jaeger:4317", description="OTLP gRPC endpoint that receives traces."

@@ -1,25 +1,25 @@
 {
   "num_queries": 20,
   "k": 10,
-  "embeddings": "fake (random vectors)",
-  "reranker_active": false,
+  "embeddings": "local fastembed bge-small (zero-padded to 1536)",
+  "reranker_active": true,
   "results": {
     "dense_only": {
-      "hit_rate": 0.25,
-      "mrr": 0.0911
+      "hit_rate": 1.0,
+      "mrr": 0.975
     },
     "rrf_only": {
-      "hit_rate": 0.25,
-      "mrr": 0.0911
+      "hit_rate": 1.0,
+      "mrr": 0.975
     },
     "rrf_rerank": {
-      "hit_rate": 0.25,
-      "mrr": 0.0911
+      "hit_rate": 1.0,
+      "mrr": 1.0
     }
   },
   "thresholds": {
     "hit_rate": 0.75,
     "mrr": 0.55
   },
-  "passed": false
+  "passed": true
 }

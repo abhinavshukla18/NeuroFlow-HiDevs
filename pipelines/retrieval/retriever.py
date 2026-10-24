@@ -12,6 +12,9 @@ COLUMNS = "c.id, c.content, c.document_id, c.metadata, d.filename"
 
 
 async def default_embed(texts: list[str]) -> list[list[float]]:
+    if get_settings().local_models:
+        from pipelines.local_models import local_embed
+        return await local_embed(texts)
     if get_settings().fake_embeddings:
         return [_fake_vector(t) for t in texts]
     from providers.client import get_client

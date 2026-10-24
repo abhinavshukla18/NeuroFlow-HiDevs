@@ -58,6 +58,9 @@ async def process_document(document_id: str, file_path: str, source_type: str) -
 
     async def embed(texts: list[str]) -> list[list[float]]:
         stats["embedding_calls"] += math.ceil(len(texts) / EMBED_BATCH)
+        if settings.local_models:
+            from pipelines.local_models import local_embed
+            return await local_embed(texts)
         if settings.fake_embeddings:
             return [_fake_vector(t) for t in texts]
         from providers.client import get_client

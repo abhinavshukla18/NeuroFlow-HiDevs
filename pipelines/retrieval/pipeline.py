@@ -15,6 +15,8 @@ class RetrievalPipeline:
     @classmethod
     def from_settings(cls, reranker_mode: str = "api") -> "RetrievalPipeline":
         settings = get_settings()
+        if settings.local_models:
+            reranker_mode = "local"
         client = None
         if settings.openai_api_key or settings.anthropic_api_key:
             from providers.client import get_client

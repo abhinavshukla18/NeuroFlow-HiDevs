@@ -56,6 +56,7 @@ services:
       - ./init:/app/init:ro
       - uploads:/data/uploads
       - ../evaluation:/app/evaluation
+      - models:/data/models
 
   worker:
     build:
@@ -72,6 +73,7 @@ services:
     env_file: ../.env
     volumes:
       - uploads:/data/uploads
+      - models:/data/models
   jaeger:
     image: jaegertracing/all-in-one:latest
     environment:
@@ -81,3 +83,4 @@ services:
 volumes:
   postgres_data:
   uploads:
+  models:

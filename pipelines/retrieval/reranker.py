@@ -50,12 +50,8 @@ class Reranker:
         return list(await asyncio.gather(*(one(c) for c in candidates)))
 
     async def _score_local(self, query: str, candidates: list[RetrievalResult]) -> list[float]:
-        if self._local is None:
-            from sentence_transformers import CrossEncoder  # optional dependency
-            self._local = CrossEncoder(LOCAL_MODEL)
-        pairs = [(query, c.content) for c in candidates]
-        scores = await asyncio.to_thread(self._local.predict, pairs)
-        return [float(s) for s in scores]
+        from pipelines.local_models import local_rerank
+        return await local_rerank(query, [c.content for c in candidates])
 
     async def rerank(self, query: str, candidates: list[RetrievalResult], top_k: int = 10) -> list[RetrievalResult]:
         pool = candidates[:RERANK_POOL]
