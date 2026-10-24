@@ -1,0 +1,25 @@
+{
+  "num_queries": 20,
+  "k": 10,
+  "embeddings": "fake (random vectors)",
+  "reranker_active": false,
+  "results": {
+    "dense_only": {
+      "hit_rate": 0.25,
+      "mrr": 0.0911
+    },
+    "rrf_only": {
+      "hit_rate": 0.25,
+      "mrr": 0.0911
+    },
+    "rrf_rerank": {
+      "hit_rate": 0.25,
+      "mrr": 0.0911
+    }
+  },
+  "thresholds": {
+    "hit_rate": 0.75,
+    "mrr": 0.55
+  },
+  "passed": false
+}

@@ -55,6 +55,7 @@ services:
     volumes:
       - ./init:/app/init:ro
       - uploads:/data/uploads
+      - ../evaluation:/app/evaluation
 
   worker:
     build:
