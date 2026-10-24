@@ -31,3 +31,7 @@ mlruns/
 .DS_Store
 .vscode/
 .idea/
+
+sample.pdf
+sample.docx
+sample.csv
