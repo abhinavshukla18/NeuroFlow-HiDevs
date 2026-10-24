@@ -38,6 +38,10 @@ class Settings(BaseSettings):
         "http://mlflow:5000", description="Base URL of the MLflow tracking server."
     )
 
+    # --- LLM providers ---
+    openai_api_key: str = Field("", description="OpenAI API key. Empty disables OpenAI models.")
+    anthropic_api_key: str = Field("", description="Anthropic API key. Empty disables Claude models.")
+
     # --- OpenTelemetry / Jaeger ---
     otel_exporter_otlp_endpoint: str = Field(
         "http://jaeger:4317", description="OTLP gRPC endpoint that receives traces."
