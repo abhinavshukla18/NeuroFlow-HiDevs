@@ -44,6 +44,7 @@ def assemble_context(results: list[RetrievalResult], token_budget: int = DEFAULT
             "source_name": result.source_name,
             "page_number": result.page_number,
             "score": result.score,
+            "content_preview": result.content[:100],
         })
         if result.source_name not in sources:
             sources.append(result.source_name)
