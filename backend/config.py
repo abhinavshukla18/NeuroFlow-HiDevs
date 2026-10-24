@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     # --- LLM providers ---
     openai_api_key: str = Field("", description="OpenAI API key. Empty disables OpenAI models.")
     anthropic_api_key: str = Field("", description="Anthropic API key. Empty disables Claude models.")
+    fake_embeddings: bool = Field(
+        False, description="Dev only: use deterministic fake vectors instead of calling an embedding API."
+    )
 
     # --- OpenTelemetry / Jaeger ---
     otel_exporter_otlp_endpoint: str = Field(
