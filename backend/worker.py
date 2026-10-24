@@ -1,38 +1,45 @@
-"""Background worker. Placeholder: connects to Postgres and Redis and stays alive."""
-
-import asyncio
 import logging
-import signal
 
-from redis.asyncio import Redis
+from arq.connections import RedisSettings
+from arq.worker import run_worker
 
+import main  # noqa: F401  (sets up OpenTelemetry tracing)
 from config import get_settings
 from db import pool
+from pipelines.ingestion.pipeline import process_document
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("neuroflow.worker")
+settings = get_settings()
+
+QUEUE_NAME = "queue:ingest"
 
 
-async def main() -> None:
-    settings = get_settings()
-    stop = asyncio.Event()
+async def ingest_document(ctx, document_id: str, file_path: str, source_type: str) -> dict:
+    return await process_document(document_id, file_path, source_type)
 
-    loop = asyncio.get_running_loop()
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, stop.set)
 
+async def startup(ctx) -> None:
     await pool.create_pool()
-    redis = Redis.from_url(settings.redis_url)
-    await redis.ping()
-    logger.info("Worker started. Waiting for jobs (none implemented yet).")
+    logger.info("Worker started, listening on %s", QUEUE_NAME)
 
-    try:
-        await stop.wait()
-    finally:
-        await redis.aclose()
-        await pool.close_pool()
-        logger.info("Worker stopped")
+
+async def shutdown(ctx) -> None:
+    await pool.close_pool()
+    logger.info("Worker stopped")
+
+
+class WorkerSettings:
+    functions = [ingest_document]
+    queue_name = QUEUE_NAME
+    redis_settings = RedisSettings(
+        host=settings.redis_host, port=settings.redis_port, password=settings.redis_password
+    )
+    on_startup = startup
+    on_shutdown = shutdown
+    max_jobs = 4
+    max_tries = 3
+    job_timeout = 600
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    run_worker(WorkerSettings)

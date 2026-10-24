@@ -54,6 +54,9 @@ services:
       - ./init:/app/init:ro
 
   worker:
+    command: python -m worker
+    environment:
+      OTEL_SERVICE_NAME: neuroflow-worker
     build: ../backend
     command: python -m worker
     depends_on:
