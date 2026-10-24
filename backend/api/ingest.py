@@ -43,7 +43,10 @@ async def ingest(request: Request):
     temp_path: Path | None = None
 
     if content_type.startswith("application/json"):
-        body = await request.json()
+        try:
+            body = await request.json()
+        except ValueError:
+            raise HTTPException(400, "Request body must be valid JSON")
         url = (body or {}).get("url", "")
         parsed = urlparse(url)
         if parsed.scheme not in ("http", "https") or not parsed.netloc:
