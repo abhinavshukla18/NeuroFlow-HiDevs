@@ -1,12 +1,17 @@
 FROM python:3.12-slim
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends tesseract-ocr \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
-# Install dependencies first so Docker can cache this layer
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY backend/requirements.txt .
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --default-timeout=120 --retries 10 -r requirements.txt
 
-COPY . .
+COPY backend/ .
+COPY pipelines/ ./pipelines/
 
 EXPOSE 8000
 

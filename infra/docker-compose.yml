@@ -40,7 +40,9 @@ services:
       start_period: 20s
 
   api:
-    build: ../backend
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
     ports: ["8000:8000"]
     depends_on:
       postgres:
@@ -52,20 +54,23 @@ services:
     env_file: ../.env
     volumes:
       - ./init:/app/init:ro
+      - uploads:/data/uploads
 
   worker:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
     command: python -m worker
     environment:
       OTEL_SERVICE_NAME: neuroflow-worker
-    build: ../backend
-    command: python -m worker
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
     env_file: ../.env
-
+    volumes:
+      - uploads:/data/uploads
   jaeger:
     image: jaegertracing/all-in-one:latest
     environment:
@@ -74,3 +79,4 @@ services:
 
 volumes:
   postgres_data:
+  uploads:

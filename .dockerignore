@@ -1,0 +1,10 @@
+.git
+.venv
+.env
+**/__pycache__
+**/*.pyc
+sample.*
+*.pdf
+*.png
+*.docx
+*.csv
