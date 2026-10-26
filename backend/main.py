@@ -15,7 +15,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, Gauge, generate_latest
 from arq import create_pool
 from arq.connections import RedisSettings
 
-from api import ingest, query, runs, pipelines, compare
+from api import ingest, query, runs, pipelines, compare, analytics
 
 from config import get_settings
 from db import health, migrations, pool
@@ -68,6 +68,7 @@ app.include_router(query.router)
 app.include_router(runs.router)
 app.include_router(pipelines.router)
 app.include_router(compare.router)
+app.include_router(analytics.router)
 
 
 @app.get("/health")
