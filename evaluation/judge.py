@@ -97,6 +97,7 @@ class EvaluationJudge:
 
             judge_model = "llm-judge" if llm_available() else "heuristic-fallback"
             await self._store(run_id, scores, overall, judge_model)
+            await update_calibration_flag(run_id)
             created_pair = overall > TRAINING_THRESHOLD and await self._store_training_pair(run, context)
 
             logger.info(json.dumps({
@@ -144,3 +145,15 @@ async def consume_forever(judge: EvaluationJudge, stop: asyncio.Event) -> None:
                 logger.exception("Evaluation failed for %s", item[1])
     finally:
         await redis.aclose()
+
+async def update_calibration_flag(run_id: str) -> bool | None:
+    pool = get_pool()
+    row = await pool.fetchrow("SELECT overall_score, user_rating FROM evaluations WHERE run_id = $1", run_id)
+    if row is None or row["overall_score"] is None or row["user_rating"] is None:
+        return None
+    needed = abs(row["overall_score"] - row["user_rating"] / 5) > 0.3
+    await pool.execute(
+        "UPDATE evaluations SET metadata = metadata || $2::jsonb WHERE run_id = $1",
+        run_id, json.dumps({"calibration_needed": needed}),
+    )
+    return needed

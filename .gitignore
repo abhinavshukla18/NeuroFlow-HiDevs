@@ -42,3 +42,6 @@ query.json
 query_full.json
 url.json
 build.log
+
+rating.json
+rating_bad.json
