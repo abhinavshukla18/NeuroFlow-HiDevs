@@ -1,7 +1,10 @@
 import logging
+import asyncio
+
 
 from arq.connections import RedisSettings
 from arq.worker import run_worker
+from evaluation.judge import EvaluationJudge, consume_forever
 
 import main  # noqa: F401  (sets up OpenTelemetry tracing)
 from config import get_settings
@@ -20,14 +23,23 @@ async def ingest_document(ctx, document_id: str, file_path: str, source_type: st
 
 async def startup(ctx) -> None:
     await pool.create_pool()
-    logger.info("Worker started, listening on %s", QUEUE_NAME)
+    ctx["stop_eval"] = asyncio.Event()
+    ctx["eval_task"] = asyncio.create_task(
+        consume_forever(EvaluationJudge.from_settings(), ctx["stop_eval"])
+    )
+    logger.info("Worker started, listening on %s and queue:evaluate", QUEUE_NAME)
 
 
 async def shutdown(ctx) -> None:
+    ctx["stop_eval"].set()
+    try:
+        await asyncio.wait_for(ctx["eval_task"], timeout=10)
+    except asyncio.TimeoutError:
+        ctx["eval_task"].cancel()
     await pool.close_pool()
     logger.info("Worker stopped")
 
-
+    
 class WorkerSettings:
     functions = [ingest_document]
     queue_name = QUEUE_NAME

@@ -12,6 +12,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 
 COPY backend/ .
 COPY pipelines/ ./pipelines/
+COPY evaluation/ ./evaluation/
 
 EXPOSE 8000
 
