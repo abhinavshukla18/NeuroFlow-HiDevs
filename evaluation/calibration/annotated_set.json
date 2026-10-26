@@ -1,0 +1,212 @@
+[
+  {
+    "query": "How does HNSW search work?",
+    "answer": "HNSW organises vectors in a layered graph. Search starts at the top layer and moves down to find nearest neighbours.",
+    "context": "HNSW organises vectors in a layered graph. Search starts at the top layer and moves down to find nearest neighbours quickly.",
+    "kind": "faithful",
+    "human_score": 1.0
+  },
+  {
+    "query": "How does HNSW search work?",
+    "answer": "HNSW organises vectors in a layered graph. It was created by engineers at a Swiss chocolate company in 1987.",
+    "context": "HNSW organises vectors in a layered graph. Search starts at the top layer and moves down to find nearest neighbours quickly.",
+    "kind": "partial",
+    "human_score": 0.5
+  },
+  {
+    "query": "How does HNSW search work?",
+    "answer": "HNSW stores every vector in a single flat spreadsheet. It requires quantum hardware to run.",
+    "context": "HNSW organises vectors in a layered graph. Search starts at the top layer and moves down to find nearest neighbours quickly.",
+    "kind": "unfaithful",
+    "human_score": 0.0
+  },
+  {
+    "query": "How does Reciprocal Rank Fusion combine lists?",
+    "answer": "Reciprocal Rank Fusion merges ranked lists by summing one divided by a constant plus rank. Items near the top of several lists get the highest combined score.",
+    "context": "Reciprocal Rank Fusion merges ranked lists by summing one divided by a constant plus rank. Items near the top of several lists get the highest combined score.",
+    "kind": "faithful",
+    "human_score": 1.0
+  },
+  {
+    "query": "How does Reciprocal Rank Fusion combine lists?",
+    "answer": "Reciprocal Rank Fusion merges ranked lists by summing one divided by a constant plus rank. It was originally designed to schedule underwater submarine patrols.",
+    "context": "Reciprocal Rank Fusion merges ranked lists by summing one divided by a constant plus rank. Items near the top of several lists get the highest combined score.",
+    "kind": "partial",
+    "human_score": 0.5
+  },
+  {
+    "query": "How does Reciprocal Rank Fusion combine lists?",
+    "answer": "This method multiplies raw similarity values by random weights. It always discards the first list entirely.",
+    "context": "Reciprocal Rank Fusion merges ranked lists by summing one divided by a constant plus rank. Items near the top of several lists get the highest combined score.",
+    "kind": "unfaithful",
+    "human_score": 0.0
+  },
+  {
+    "query": "Why are containers lighter than virtual machines?",
+    "answer": "Containers share the host kernel, so they are lighter than virtual machines. Docker packages an application and its dependencies into a container image.",
+    "context": "Docker packages an application and its dependencies into a container image. Containers share the host kernel, so they are lighter than virtual machines.",
+    "kind": "faithful",
+    "human_score": 1.0
+  },
+  {
+    "query": "Why are containers lighter than virtual machines?",
+    "answer": "Containers share the host kernel, so they are lighter than virtual machines. Each container needs its own physical graphics card to boot.",
+    "context": "Docker packages an application and its dependencies into a container image. Containers share the host kernel, so they are lighter than virtual machines.",
+    "kind": "partial",
+    "human_score": 0.5
+  },
+  {
+    "query": "Why are containers lighter than virtual machines?",
+    "answer": "Every container ships a full copy of a separate operating system. They must be restarted every ten seconds.",
+    "context": "Docker packages an application and its dependencies into a container image. Containers share the host kernel, so they are lighter than virtual machines.",
+    "kind": "unfaithful",
+    "human_score": 0.0
+  },
+  {
+    "query": "What does Redis do when memory is full under LRU?",
+    "answer": "With an LRU policy Redis evicts the least recently used keys when memory is full. Redis is an in-memory data store used for caching and queues.",
+    "context": "Redis is an in-memory data store used for caching and queues. With an LRU policy it evicts the least recently used keys when memory is full.",
+    "kind": "faithful",
+    "human_score": 1.0
+  },
+  {
+    "query": "What does Redis do when memory is full under LRU?",
+    "answer": "With an LRU policy Redis evicts the least recently used keys when memory is full. It stores all data on magnetic tape reels.",
+    "context": "Redis is an in-memory data store used for caching and queues. With an LRU policy it evicts the least recently used keys when memory is full.",
+    "kind": "partial",
+    "human_score": 0.5
+  },
+  {
+    "query": "What does Redis do when memory is full under LRU?",
+    "answer": "It crashes permanently and deletes the entire database. Administrators must then reinstall the operating system by hand.",
+    "context": "Redis is an in-memory data store used for caching and queues. With an LRU policy it evicts the least recently used keys when memory is full.",
+    "kind": "unfaithful",
+    "human_score": 0.0
+  },
+  {
+    "query": "Where does photosynthesis happen?",
+    "answer": "Photosynthesis takes place in chloroplasts, which contain chlorophyll. It converts sunlight, water and carbon dioxide into glucose and oxygen.",
+    "context": "Photosynthesis converts sunlight, water and carbon dioxide into glucose and oxygen. It takes place in chloroplasts, which contain chlorophyll.",
+    "kind": "faithful",
+    "human_score": 1.0
+  },
+  {
+    "query": "Where does photosynthesis happen?",
+    "answer": "Photosynthesis takes place in chloroplasts, which contain chlorophyll. The process is powered entirely by volcanic heat from deep underground.",
+    "context": "Photosynthesis converts sunlight, water and carbon dioxide into glucose and oxygen. It takes place in chloroplasts, which contain chlorophyll.",
+    "kind": "partial",
+    "human_score": 0.5
+  },
+  {
+    "query": "Where does photosynthesis happen?",
+    "answer": "Plants make food inside their roots using moonlight. The leaves only serve to store extra salt.",
+    "context": "Photosynthesis converts sunlight, water and carbon dioxide into glucose and oxygen. It takes place in chloroplasts, which contain chlorophyll.",
+    "kind": "unfaithful",
+    "human_score": 0.0
+  },
+  {
+    "query": "When does the Indian monsoon bring its rain?",
+    "answer": "The Indian summer monsoon brings most annual rainfall between June and September. It is driven by seasonal reversal of winds as land heats faster than the ocean.",
+    "context": "The Indian summer monsoon brings most annual rainfall between June and September. It is driven by seasonal reversal of winds as land heats faster than the ocean.",
+    "kind": "faithful",
+    "human_score": 1.0
+  },
+  {
+    "query": "When does the Indian monsoon bring its rain?",
+    "answer": "The Indian summer monsoon brings most annual rainfall between June and September. Rain is caused by giant fans operated in Mumbai harbour.",
+    "context": "The Indian summer monsoon brings most annual rainfall between June and September. It is driven by seasonal reversal of winds as land heats faster than the ocean.",
+    "kind": "partial",
+    "human_score": 0.5
+  },
+  {
+    "query": "When does the Indian monsoon bring its rain?",
+    "answer": "Rainfall arrives mainly in winter because of volcanic ash. Farmers plant everything in December as a result.",
+    "context": "The Indian summer monsoon brings most annual rainfall between June and September. It is driven by seasonal reversal of winds as land heats faster than the ocean.",
+    "kind": "unfaithful",
+    "human_score": 0.0
+  },
+  {
+    "query": "What is Mysore Palace known for?",
+    "answer": "Mysore Palace is a royal residence known for Indo-Saracenic architecture. It is lit by about one hundred thousand bulbs during the Dasara festival.",
+    "context": "Mysore Palace is a royal residence known for Indo-Saracenic architecture. It is lit by about one hundred thousand bulbs during the Dasara festival.",
+    "kind": "faithful",
+    "human_score": 1.0
+  },
+  {
+    "query": "What is Mysore Palace known for?",
+    "answer": "Mysore Palace is a royal residence known for Indo-Saracenic architecture. It was built entirely from recycled plastic bottles last year.",
+    "context": "Mysore Palace is a royal residence known for Indo-Saracenic architecture. It is lit by about one hundred thousand bulbs during the Dasara festival.",
+    "kind": "partial",
+    "human_score": 0.5
+  },
+  {
+    "query": "What is Mysore Palace known for?",
+    "answer": "The building is a modern glass skyscraper used as an airport. It contains an indoor ski slope.",
+    "context": "Mysore Palace is a royal residence known for Indo-Saracenic architecture. It is lit by about one hundred thousand bulbs during the Dasara festival.",
+    "kind": "unfaithful",
+    "human_score": 0.0
+  },
+  {
+    "query": "What does MLflow track?",
+    "answer": "MLflow tracks machine learning experiments by logging parameters, metrics and artifacts for every run. Teams compare runs in a web interface to choose the best model.",
+    "context": "MLflow tracks machine learning experiments by logging parameters, metrics and artifacts for every run. Teams compare runs in a web interface to choose the best model.",
+    "kind": "faithful",
+    "human_score": 1.0
+  },
+  {
+    "query": "What does MLflow track?",
+    "answer": "MLflow tracks machine learning experiments by logging parameters, metrics and artifacts for every run. It also brews coffee for the whole office.",
+    "context": "MLflow tracks machine learning experiments by logging parameters, metrics and artifacts for every run. Teams compare runs in a web interface to choose the best model.",
+    "kind": "partial",
+    "human_score": 0.5
+  },
+  {
+    "query": "What does MLflow track?",
+    "answer": "It translates songs into sign language. Results are printed on postcards and mailed monthly.",
+    "context": "MLflow tracks machine learning experiments by logging parameters, metrics and artifacts for every run. Teams compare runs in a web interface to choose the best model.",
+    "kind": "unfaithful",
+    "human_score": 0.0
+  },
+  {
+    "query": "Why is a cross-encoder used only on a short list?",
+    "answer": "A cross-encoder reads the query and a passage together and outputs one relevance score. It is more accurate than separate embeddings but too slow to run over a whole corpus.",
+    "context": "A cross-encoder reads the query and a passage together and outputs one relevance score. It is more accurate than separate embeddings but too slow to run over a whole corpus.",
+    "kind": "faithful",
+    "human_score": 1.0
+  },
+  {
+    "query": "Why is a cross-encoder used only on a short list?",
+    "answer": "A cross-encoder reads the query and a passage together and outputs one relevance score. It was invented by medieval monks to copy manuscripts.",
+    "context": "A cross-encoder reads the query and a passage together and outputs one relevance score. It is more accurate than separate embeddings but too slow to run over a whole corpus.",
+    "kind": "partial",
+    "human_score": 0.5
+  },
+  {
+    "query": "Why is a cross-encoder used only on a short list?",
+    "answer": "It compresses images into tiny icons. The icons are sorted alphabetically by colour.",
+    "context": "A cross-encoder reads the query and a passage together and outputs one relevance score. It is more accurate than separate embeddings but too slow to run over a whole corpus.",
+    "kind": "unfaithful",
+    "human_score": 0.0
+  },
+  {
+    "query": "What does a server send when a client exceeds the rate limit?",
+    "answer": "Servers reply to excess traffic with HTTP 429 and a Retry-After header. Rate limiting caps how many requests a client may send per minute.",
+    "context": "Rate limiting caps how many requests a client may send per minute. Servers reply to excess traffic with HTTP 429 and a Retry-After header.",
+    "kind": "faithful",
+    "human_score": 1.0
+  },
+  {
+    "query": "What does a server send when a client exceeds the rate limit?",
+    "answer": "Servers reply to excess traffic with HTTP 429 and a Retry-After header. The client is then banned from the internet for ten years.",
+    "context": "Rate limiting caps how many requests a client may send per minute. Servers reply to excess traffic with HTTP 429 and a Retry-After header.",
+    "kind": "partial",
+    "human_score": 0.5
+  },
+  {
+    "query": "What does a server send when a client exceeds the rate limit?",
+    "answer": "Servers answer with a cheerful greeting and double the quota. Clients are rewarded with free storage.",
+    "context": "Rate limiting caps how many requests a client may send per minute. Servers reply to excess traffic with HTTP 429 and a Retry-After header.",
+    "kind": "unfaithful",
+    "human_score": 0.0
+  }
+]
