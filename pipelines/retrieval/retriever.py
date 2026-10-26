@@ -87,11 +87,12 @@ class Retriever:
         )
         return [_to_result(r, "metadata", 1.0 - float(r["distance"])) for r in rows]
 
-    async def retrieve(self, analysis: QueryAnalysis, k: int = 20) -> list[RetrievalResult]:
+    async def retrieve(self, analysis: QueryAnalysis, k: int = 20, dense_k: int | None = None,
+                       sparse_k: int | None = None) -> list[RetrievalResult]:
         queries = analysis.all_queries
         results = await asyncio.gather(
-            self._dense_retrieval(queries, k),
-            self._sparse_retrieval(queries, k),
+            self._dense_retrieval(queries, dense_k or k),
+            self._sparse_retrieval(queries, sparse_k or k),
             self._metadata_retrieval(analysis.original, analysis.filters, k),
         )
         return reciprocal_rank_fusion([r for r in results if r])

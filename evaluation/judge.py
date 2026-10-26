@@ -14,6 +14,7 @@ from evaluation.metrics.context_precision import evaluate_context_precision
 from evaluation.metrics.context_recall import evaluate_context_recall
 from evaluation.metrics.faithfulness import evaluate_faithfulness
 from pipelines.generation.prompt_builder import build_system_prompt
+from services.pipeline_runtime import config_for
 
 logger = logging.getLogger("neuroflow.evaluation")
 tracer = trace.get_tracer("neuroflow.evaluation")
@@ -55,7 +56,7 @@ class EvaluationJudge:
     async def _load(self, run_id: str):
         pool = get_pool()
         run = await pool.fetchrow(
-            "SELECT id, query, generation, retrieved_chunk_ids, metadata FROM pipeline_runs WHERE id = $1", run_id
+            "SELECT id, query, generation, retrieved_chunk_ids, metadata, pipeline_id, pipeline_version FROM pipeline_runs WHERE id = $1"
         )
         if run is None:
             raise ValueError(f"Run {run_id} not found")
@@ -75,6 +76,7 @@ class EvaluationJudge:
 
     async def evaluate(self, run_id: str) -> dict:
         run, chunks, context = await self._load(run_id)
+        threshold = (await config_for(run["pipeline_id"],run["pipeline_version"])).evaluation.training_threshold
         query, answer = run["query"], run["generation"]
 
         with tracer.start_as_current_span("evaluation.judge") as span:
@@ -98,7 +100,7 @@ class EvaluationJudge:
             judge_model = "llm-judge" if llm_available() else "heuristic-fallback"
             await self._store(run_id, scores, overall, judge_model)
             await update_calibration_flag(run_id)
-            created_pair = overall > TRAINING_THRESHOLD and await self._store_training_pair(run, context)
+            created_pair = overall > threshold and await self._store_training_pair(run, context)
 
             logger.info(json.dumps({
                 "event": "evaluation_complete", "run_id": run_id, "overall": round(overall, 3),

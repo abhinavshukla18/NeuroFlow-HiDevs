@@ -12,15 +12,22 @@ TYPE_ADDITIONS = {
     "procedural": "Provide numbered steps. Each step must be cited.",
 }
 
+VARIANTS = {
+    "default": "",
+    "precise": "Be exact: reproduce numbers, names and clause wording precisely, and avoid paraphrasing key terms.",
+    "concise": "Keep the answer under 120 words.",
+}
 
-def build_system_prompt(query_type: str) -> str:
+
+def build_system_prompt(query_type: str, variant: str = "default") -> str:
     addition = TYPE_ADDITIONS.get(query_type, TYPE_ADDITIONS["factual"])
-    return f"{BASE_SYSTEM_PROMPT}\n\n{addition}"
+    parts = [BASE_SYSTEM_PROMPT, addition, VARIANTS.get(variant, "")]
+    return "\n\n".join(p for p in parts if p)
 
 
-def build_messages(query: str, context: str, query_type: str = "factual") -> list[ChatMessage]:
+def build_messages(query: str, context: str, query_type: str = "factual", variant: str = "default") -> list[ChatMessage]:
     user = f"<context>\n{context}\n</context>\n\n{query}"
     return [
-        ChatMessage(role="system", content=build_system_prompt(query_type)),
+        ChatMessage(role="system", content=build_system_prompt(query_type, variant)),
         ChatMessage(role="user", content=user),
     ]
