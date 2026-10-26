@@ -15,7 +15,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, Gauge, generate_latest
 from arq import create_pool
 from arq.connections import RedisSettings
 
-from api import ingest, query, runs
+from api import ingest, query, runs, pipelines
 
 from config import get_settings
 from db import health, migrations, pool
@@ -66,6 +66,7 @@ app = FastAPI(title="NeuroFlow API", version="0.1.0", lifespan=lifespan)
 app.add_middleware(OpenTelemetryMiddleware)
 app.include_router(query.router)
 app.include_router(runs.router)
+app.include_router(pipelines.router)
 
 
 @app.get("/health")
