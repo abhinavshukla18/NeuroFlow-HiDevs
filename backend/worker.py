@@ -10,6 +10,7 @@ import main  # noqa: F401  (sets up OpenTelemetry tracing)
 from config import get_settings
 from db import pool
 from pipelines.ingestion.pipeline import process_document
+from pipelines.finetuning.job_manager import poll_finetune_job
 
 logger = logging.getLogger("neuroflow.worker")
 settings = get_settings()
@@ -41,7 +42,7 @@ async def shutdown(ctx) -> None:
 
     
 class WorkerSettings:
-    functions = [ingest_document]
+    functions = [ingest_document, poll_finetune_job]
     queue_name = QUEUE_NAME
     redis_settings = RedisSettings(
         host=settings.redis_host, port=settings.redis_port, password=settings.redis_password
