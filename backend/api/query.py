@@ -7,6 +7,8 @@ from sse_starlette.sse import EventSourceResponse
 
 from db.pool import get_pool
 from pipelines.generation.generator import create_run, generate_full, run_events
+from fastapi import Depends
+from resilience.rate_limiter import ip_limit
 
 router = APIRouter()
 
@@ -17,7 +19,7 @@ class QueryRequest(BaseModel):
     stream: bool = False
 
 
-@router.post("/query")
+@router.post("/query", dependencies=[Depends(ip_limit("query", 60, 60))])
 async def query(body: QueryRequest):
     if not body.query.strip():
         raise HTTPException(400, "Query must not be empty")

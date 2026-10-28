@@ -4,7 +4,9 @@ import uuid
 from pathlib import Path
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends, Response
+from resilience.rate_limiter import ip_limit
+from resilience.backpressure import check_backpressure
 
 from db.pool import get_pool
 
@@ -36,8 +38,10 @@ async def _save_upload(upload, temp_path: Path) -> str:
     return sha.hexdigest()
 
 
-@router.post("/ingest")
-async def ingest(request: Request):
+@router.post("/ingest", dependencies=[Depends(ip_limit("ingest", 10, 3600))])
+async def ingest(request: Request, response: Response):
+    warning = await check_backpressure(response)
+
     document_id = uuid.uuid4()
     content_type = request.headers.get("content-type", "")
     temp_path: Path | None = None
@@ -91,7 +95,10 @@ async def ingest(request: Request):
         temp_path.rename(file_path)
 
     await request.app.state.arq.enqueue_job("ingest_document", str(document_id), file_path, source_type)
-    return {"document_id": str(document_id), "status": "queued", "duplicate": False}
+    result = {"document_id": str(document_id), "status": "queued", "duplicate": False}
+    if warning:
+        result.update(warning)
+    return result
 
 
 @router.get("/documents/{document_id}")

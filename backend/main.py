@@ -1,7 +1,12 @@
 """NeuroFlow API: async FastAPI app."""
 
 import logging
+import time
 from contextlib import asynccontextmanager
+
+from db.pool import get_pool
+from resilience.circuit_breaker import CircuitBreaker, get_redis
+from resilience.backpressure import queue_depth
 
 from fastapi import FastAPI, Response
 from fastapi.responses import JSONResponse
@@ -81,9 +86,50 @@ async def get_health():
     for name, ok in checks.items():
         DEPENDENCY_UP.labels(dependency=name).set(1 if ok else 0)
 
-    all_ok = all(checks.values())
-    body = {"status": "ok" if all_ok else "degraded", "checks": checks}
-    return JSONResponse(content=body, status_code=200 if all_ok else 503)
+    result = {n: {"status": "ok" if ok else "down"} for n, ok in checks.items()}
+
+    try:
+        t = time.perf_counter()
+        await get_pool().fetchval("SELECT 1")
+        result["postgres"] = {"status": "ok", "latency_ms": round((time.perf_counter() - t) * 1000)}
+    except Exception:
+        result["postgres"] = {"status": "down"}
+
+    try:
+        r = get_redis()
+        t = time.perf_counter()
+        await r.ping()
+        result["redis"] = {"status": "ok", "latency_ms": round((time.perf_counter() - t) * 1000)}
+        depth = await queue_depth()
+        workers = 1 if await r.exists("arq:queue:health-check") else 0
+    except Exception:
+        result["redis"] = {"status": "down"}
+        depth, workers = None, 0
+
+    breakers = {}
+    for name in ("openai", "anthropic"):
+        try:
+            breakers[name] = await CircuitBreaker(name).status()
+        except Exception:
+            breakers[name] = {"state": "unknown"}
+
+    if result["postgres"]["status"] != "ok" or result["redis"]["status"] != "ok":
+        status = "critical"
+    elif any(b.get("state") == "open" for b in breakers.values()) or not all(checks.values()):
+        status = "degraded"
+    else:
+        status = "ok"
+
+    body = {
+        "status": status,
+        "checks": {
+            **result,
+            "circuit_breakers": breakers,
+            "queue_depth": depth,
+            "worker_count": workers,
+        },
+    }
+    return JSONResponse(content=body, status_code=503 if status == "critical" else 200)
 
 
 @app.get("/metrics")
