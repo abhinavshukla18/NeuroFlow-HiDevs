@@ -10,6 +10,7 @@ from opentelemetry import trace
 
 from config import get_settings
 from db.pool import get_pool
+from monitoring.metrics import ingestion_docs_total
 from pipelines.ingestion.chunker import chunk_document
 from pipelines.ingestion.extractors import ExtractedPage
 from pipelines.ingestion.extractors.csv_extractor import extract_csv
@@ -55,6 +56,7 @@ async def process_document(document_id: str, file_path: str, source_type: str) -
     pool = get_pool()
     started = time.perf_counter()
     stats = {"embedding_calls": 0}
+    attrs = {"document_id": document_id, "source_type": source_type}
 
     async def embed(texts: list[str]) -> list[list[float]]:
         stats["embedding_calls"] += math.ceil(len(texts) / EMBED_BATCH)
@@ -66,44 +68,56 @@ async def process_document(document_id: str, file_path: str, source_type: str) -
         from providers.client import get_client
         return await get_client().embed(texts)
 
-    with tracer.start_as_current_span("ingestion.process") as span:
-        span.set_attribute("document_id", document_id)
-        span.set_attribute("source_type", source_type)
+    with tracer.start_as_current_span("ingestion.process", attributes=attrs) as span:
         try:
             await pool.execute("UPDATE documents SET status = 'processing' WHERE id = $1", document_id)
 
-            pages = await _extract(file_path, source_type)
+            with tracer.start_as_current_span(f"ingestion.extract.{source_type}", attributes=attrs) as sp:
+                pages = await _extract(file_path, source_type)
+                sp.set_attribute("page_count", len(pages))
             span.set_attribute("page_count", len(pages))
             if not pages:
                 raise ValueError("No content could be extracted")
 
-            chunks = await chunk_document(pages, source_type, embed=embed)
-            vectors: list[list[float]] = []
-            for i in range(0, len(chunks), EMBED_BATCH):
-                vectors.extend(await embed([c.content for c in chunks[i : i + EMBED_BATCH]]))
+            with tracer.start_as_current_span("ingestion.chunk", attributes=attrs) as sp:
+                chunks = await chunk_document(pages, source_type, embed=embed)
+                sp.set_attribute("chunk_count", len(chunks))
+                sp.set_attribute("token_count", sum(c.token_count for c in chunks))
+
+            with tracer.start_as_current_span("ingestion.embed", attributes=attrs) as sp:
+                vectors: list[list[float]] = []
+                for i in range(0, len(chunks), EMBED_BATCH):
+                    vectors.extend(await embed([c.content for c in chunks[i : i + EMBED_BATCH]]))
+                sp.set_attribute("chunk_count", len(vectors))
+                sp.set_attribute("embedding_calls", stats["embedding_calls"])
 
             rows = [
                 (document_id, c.content, "[" + ",".join(map(str, v)) + "]",
                  c.chunk_index, c.token_count, json.dumps(c.metadata, default=str))
                 for c, v in zip(chunks, vectors)
             ]
-            async with pool.acquire() as conn:
-                async with conn.transaction():
-                    await conn.execute("DELETE FROM chunks WHERE document_id = $1", document_id)
-                    await conn.executemany(
-                        "INSERT INTO chunks (document_id, content, embedding, chunk_index, token_count, metadata) "
-                        "VALUES ($1, $2, $3::vector, $4, $5, $6::jsonb)",
-                        rows,
-                    )
-                    await conn.execute(
-                        "UPDATE documents SET status = 'complete', chunk_count = $2 WHERE id = $1",
-                        document_id, len(chunks),
-                    )
+            with tracer.start_as_current_span("ingestion.write_db", attributes=attrs) as sp:
+                sp.set_attribute("chunk_count", len(rows))
+                async with pool.acquire() as conn:
+                    async with conn.transaction():
+                        await conn.execute("DELETE FROM chunks WHERE document_id = $1", document_id)
+                        await conn.executemany(
+                            "INSERT INTO chunks (document_id, content, embedding, chunk_index, token_count, metadata) "
+                            "VALUES ($1, $2, $3::vector, $4, $5, $6::jsonb)",
+                            rows,
+                        )
+                        await conn.execute(
+                            "UPDATE documents SET status = 'complete', chunk_count = $2 WHERE id = $1",
+                            document_id, len(chunks),
+                        )
 
             tokens = sum(c.token_count for c in chunks)
             duration_ms = round((time.perf_counter() - started) * 1000)
             span.set_attribute("chunk_count", len(chunks))
+            span.set_attribute("token_count", tokens)
             span.set_attribute("embedding_calls", stats["embedding_calls"])
+            span.set_attribute("latency_ms", duration_ms)
+            ingestion_docs_total.labels(source_type=source_type).inc()
             logger.info(json.dumps({
                 "event": "ingestion_complete", "document_id": document_id,
                 "duration_ms": duration_ms, "chunks": len(chunks), "tokens": tokens,

@@ -1,14 +1,33 @@
 import asyncio
 import json
+import time
+
+from opentelemetry import trace
 
 from config import get_settings
 from db.pool import get_pool
+from monitoring.metrics import retrieval_latency
 from pipelines.ingestion.pipeline import _fake_vector
 from pipelines.retrieval import RetrievalResult
 from pipelines.retrieval.fusion import reciprocal_rank_fusion
 from pipelines.retrieval.query_processor import QueryAnalysis
 
+tracer = trace.get_tracer("neuroflow.retrieval")
 COLUMNS = "c.id, c.content, c.document_id, c.metadata, d.filename"
+
+
+def _parent_attrs() -> dict:
+    attrs = getattr(trace.get_current_span(), "attributes", None) or {}
+    return {k: attrs[k] for k in ("pipeline_id", "run_id") if k in attrs}
+
+
+async def _traced(span_name: str, strategy: str, coro):
+    with tracer.start_as_current_span(span_name, attributes=_parent_attrs()) as span:
+        started = time.perf_counter()
+        results = await coro
+        span.set_attribute("chunk_count", len(results))
+        retrieval_latency.labels(strategy=strategy).observe(time.perf_counter() - started)
+        return results
 
 
 async def default_embed(texts: list[str]) -> list[list[float]]:
@@ -91,8 +110,14 @@ class Retriever:
                        sparse_k: int | None = None) -> list[RetrievalResult]:
         queries = analysis.all_queries
         results = await asyncio.gather(
-            self._dense_retrieval(queries, dense_k or k),
-            self._sparse_retrieval(queries, sparse_k or k),
-            self._metadata_retrieval(analysis.original, analysis.filters, k),
+            _traced("retrieval.dense", "dense", self._dense_retrieval(queries, dense_k or k)),
+            _traced("retrieval.sparse", "sparse", self._sparse_retrieval(queries, sparse_k or k)),
+            _traced("retrieval.metadata", "metadata",
+                    self._metadata_retrieval(analysis.original, analysis.filters, k)),
         )
-        return reciprocal_rank_fusion([r for r in results if r])
+        with tracer.start_as_current_span("retrieval.fusion", attributes=_parent_attrs()) as span:
+            started = time.perf_counter()
+            fused = reciprocal_rank_fusion([r for r in results if r])
+            span.set_attribute("chunk_count", len(fused))
+            retrieval_latency.labels(strategy="fusion").observe(time.perf_counter() - started)
+            return fused

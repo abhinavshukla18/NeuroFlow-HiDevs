@@ -4,20 +4,25 @@ import logging
 import time
 from typing import AsyncGenerator
 
+from opentelemetry import context as otel_context
+from opentelemetry import trace
 from redis.asyncio import Redis
 
 from config import get_settings
 from db.pool import get_pool
+from monitoring.metrics import generation_latency, llm_cost, lm_calls_total, queries_total
 from pipelines.generation.citations import parse_citations
 from pipelines.generation.prompt_builder import build_messages
 from pipelines.ingestion.chunker import count_tokens
 from pipelines.retrieval.pipeline import RetrievalPipeline
 from providers.fake_provider import FakeProvider
-from providers.router import RoutingCriteria
+from providers.router import DEFAULT_MODELS, RoutingCriteria
 from services.pipeline_runtime import config_for
 
 logger = logging.getLogger("neuroflow.generation")
+tracer = trace.get_tracer("neuroflow.generation")
 EVAL_QUEUE = "queue:evaluate"
+PRICES = {m["model"]: (m["input_price"], m["output_price"]) for m in DEFAULT_MODELS}
 
 _background: set[asyncio.Task] = set()
 _redis: Redis | None = None
@@ -96,23 +101,42 @@ async def run_events(run_id: str) -> AsyncGenerator[dict, None]:
     if row is None:
         raise RunNotAvailable(run_id)
     query = row["query"]
+    pipeline_id = str(row["pipeline_id"])
     started = time.perf_counter()
+
+    root = tracer.start_span("generation.pipeline")
+    root.set_attribute("pipeline_id", pipeline_id)
+    root.set_attribute("run_id", run_id)
+    root_ctx = trace.set_span_in_context(root)
 
     try:
         config = await config_for(row["pipeline_id"], row["pipeline_version"])
         yield {"type": "retrieval_start"}
-        out = await RetrievalPipeline.from_settings().run(
-            query,
-            k=config.retrieval.top_k_after_rerank,
-            token_budget=config.generation.max_context_tokens,
-            retrieval=config.retrieval,
-        )
+
+        ctx_token = otel_context.attach(root_ctx)
+        try:
+            out = await RetrievalPipeline.from_settings().run(
+                query,
+                k=config.retrieval.top_k_after_rerank,
+                token_budget=config.generation.max_context_tokens,
+                retrieval=config.retrieval,
+                pipeline_id=pipeline_id,
+                run_id=run_id,
+            )
+        finally:
+            otel_context.detach(ctx_token)
+
         retrieval_ms = round((time.perf_counter() - started) * 1000)
         ctx = out["context"]
         yield {"type": "retrieval_complete", "chunk_count": len(ctx.chunks_used), "sources": ctx.sources}
 
-        messages = build_messages(query, ctx.context, out["query_type"], config.generation.system_prompt_variant)
-        prompt_text = "\n\n".join(f"[{m.role}]\n{m.content}" for m in messages)
+        with tracer.start_as_current_span("generation.prompt_build", context=root_ctx) as sp:
+            sp.set_attribute("pipeline_id", pipeline_id)
+            sp.set_attribute("run_id", run_id)
+            messages = build_messages(query, ctx.context, out["query_type"], config.generation.system_prompt_variant)
+            prompt_text = "\n\n".join(f"[{m.role}]\n{m.content}" for m in messages)
+            sp.set_attribute("chunk_count", len(ctx.chunks_used))
+            sp.set_attribute("token_count", count_tokens(prompt_text))
         await pool.execute(
             "UPDATE pipeline_runs SET prompt = $2, retrieved_chunk_ids = $3::uuid[], "
             "metadata = metadata || $4::jsonb WHERE id = $1",
@@ -122,46 +146,28 @@ async def run_events(run_id: str) -> AsyncGenerator[dict, None]:
         )
 
         provider, model = await _select_provider(config.generation.model_routing)
+        provider_name = type(provider).__name__.replace("Provider", "").lower()
         gen_started = time.perf_counter()
         parts: list[str] = []
-        async for token in provider.stream(messages, temperature=config.generation.temperature):
-            parts.append(token)
-            yield {"type": "token", "delta": token}
-        response = "".join(parts)
-        generation_ms = round((time.perf_counter() - gen_started) * 1000)
 
-        citations = [c.to_dict() for c in parse_citations(response, ctx.chunks_used)]
-        latency_ms = round((time.perf_counter() - started) * 1000)
-        await pool.execute(
-            "UPDATE pipeline_runs SET generation = $2, input_tokens = $3, output_tokens = $4, "
-            "model_used = $5, latency_ms = $6, status = 'complete', metadata = metadata || $7::jsonb WHERE id = $1",
-            run_id, response, count_tokens(prompt_text), count_tokens(response), model, latency_ms,
-            json.dumps({"citations": citations, "generation_latency_ms": generation_ms}),
-        )
-        if config.evaluation.auto_evaluate:
-            _enqueue_evaluation(run_id)  # not awaited: generation never waits on evaluation
-        logger.info(json.dumps({"event": "generation_complete", "run_id": run_id, "latency_ms": latency_ms}))
-        yield {"type": "done", "run_id": run_id, "citations": [_public_citation(c) for c in citations]}
+        llm_span = tracer.start_span("generation.llm_call", context=root_ctx)
+        llm_span.set_attribute("pipeline_id", pipeline_id)
+        llm_span.set_attribute("run_id", run_id)
+        llm_span.set_attribute("model", model)
+        try:
+            async for tok in provider.stream(messages, temperature=config.generation.temperature):
+                parts.append(tok)
+                yield {"type": "token", "delta": tok}
+            response = "".join(parts)
+            generation_ms = round((time.perf_counter() - gen_started) * 1000)
+            in_tok, out_tok = count_tokens(prompt_text), count_tokens(response)
+            in_price, out_price = PRICES.get(model, (0, 0))
+            cost = (in_tok * in_price + out_tok * out_price) / 1_000_000
+            llm_span.set_attribute("input_tokens", in_tok)
+            llm_span.set_attribute("output_tokens", out_tok)
+            llm_span.set_attribute("cost_usd", cost)
+            llm_span.set_attribute("latency_ms", generation_ms)
+        finally:
+            llm_span.end()
 
-    except Exception as exc:
-        logger.exception("Generation failed for %s", run_id)
-        await pool.execute(
-            "UPDATE pipeline_runs SET status = 'failed', "
-            "metadata = metadata || jsonb_build_object('error', $2::text) WHERE id = $1",
-            run_id, str(exc)[:500],
-        )
-        yield {"type": "error", "message": str(exc)}
-
-
-async def generate_full(run_id: str) -> dict:
-    response, done, error = [], None, None
-    async for event in run_events(run_id):
-        if event["type"] == "token":
-            response.append(event["delta"])
-        elif event["type"] == "done":
-            done = event
-        elif event["type"] == "error":
-            error = event["message"]
-    if error:
-        return {"run_id": run_id, "status": "failed", "error": error}
-    return {"run_id": run_id, "status": "complete", "response": "".join(response), "citations": done["citations"]}
+        generation_latency.labels(model=model).observe(generation_ms / 1000)

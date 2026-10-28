@@ -13,6 +13,7 @@ from evaluation.metrics.answer_relevance import evaluate_answer_relevance
 from evaluation.metrics.context_precision import evaluate_context_precision
 from evaluation.metrics.context_recall import evaluate_context_recall
 from evaluation.metrics.faithfulness import evaluate_faithfulness
+from monitoring.metrics import eval_faithfulness, eval_overall
 from pipelines.generation.prompt_builder import build_system_prompt
 from services.pipeline_runtime import config_for
 
@@ -30,14 +31,30 @@ def _as_dict(value) -> dict:
     return dict(value or {})
 
 
-async def _timed(name: str, coro):
-    start = time.perf_counter()
-    value = await coro
-    return name, value, round((time.perf_counter() - start) * 1000)
+async def _timed(name: str, coro, attrs: dict):
+    with tracer.start_as_current_span(f"evaluation.{name}", attributes=attrs) as sp:
+        start = time.perf_counter()
+        value = await coro
+        ms = round((time.perf_counter() - start) * 1000)
+        sp.set_attribute("score", float(value))
+        sp.set_attribute("latency_ms", ms)
+        return name, value, ms
 
 
 def overall_score(scores: dict) -> float:
     return sum(WEIGHTS[name] * scores[name] for name in WEIGHTS)
+
+
+async def _update_gauges(pipeline_id) -> None:
+    row = await get_pool().fetchrow(
+        "SELECT avg(e.faithfulness) AS f, avg(e.overall_score) AS o FROM evaluations e "
+        "JOIN pipeline_runs r ON r.id = e.run_id "
+        "WHERE r.pipeline_id = $1 AND e.evaluated_at > now() - interval '24 hours'",
+        pipeline_id,
+    )
+    if row and row["o"] is not None:
+        eval_faithfulness.labels(pipeline_id=str(pipeline_id)).set(float(row["f"] or 0))
+        eval_overall.labels(pipeline_id=str(pipeline_id)).set(float(row["o"]))
 
 
 class EvaluationJudge:
@@ -56,7 +73,9 @@ class EvaluationJudge:
     async def _load(self, run_id: str):
         pool = get_pool()
         run = await pool.fetchrow(
-            "SELECT id, query, generation, retrieved_chunk_ids, metadata, pipeline_id, pipeline_version FROM pipeline_runs WHERE id = $1"
+            "SELECT id, query, generation, retrieved_chunk_ids, metadata, pipeline_id, pipeline_version "
+            "FROM pipeline_runs WHERE id = $1",
+            run_id,
         )
         if run is None:
             raise ValueError(f"Run {run_id} not found")
@@ -71,21 +90,22 @@ class EvaluationJudge:
         by_id = {r["id"]: r for r in rows}
         ordered = [by_id[cid] for cid in chunk_ids if cid in by_id]
         chunks = [r["content"] for r in ordered]
-        context = "\n\n".join(f"[Source {i} — {r['filename']}]\n{r['content']}" for i, r in enumerate(ordered, 1))
+        context = "\n\n".join(f"[Source {i} - {r['filename']}]\n{r['content']}" for i, r in enumerate(ordered, 1))
         return run, chunks, context
 
     async def evaluate(self, run_id: str) -> dict:
         run, chunks, context = await self._load(run_id)
-        threshold = (await config_for(run["pipeline_id"],run["pipeline_version"])).evaluation.training_threshold
+        threshold = (await config_for(run["pipeline_id"], run["pipeline_version"])).evaluation.training_threshold
         query, answer = run["query"], run["generation"]
+        attrs = {"pipeline_id": str(run["pipeline_id"]), "run_id": str(run_id)}
 
-        with tracer.start_as_current_span("evaluation.judge") as span:
+        with tracer.start_as_current_span("evaluation.judge", attributes=attrs) as span:
             started = time.perf_counter()
             results = await asyncio.gather(
-                _timed("faithfulness", evaluate_faithfulness(query, answer, context, self.client)),
-                _timed("answer_relevance", evaluate_answer_relevance(query, answer, self.client)),
-                _timed("context_precision", evaluate_context_precision(query, chunks, answer, self.client)),
-                _timed("context_recall", evaluate_context_recall(query, chunks, answer, self.client)),
+                _timed("faithfulness", evaluate_faithfulness(query, answer, context, self.client), attrs),
+                _timed("answer_relevance", evaluate_answer_relevance(query, answer, self.client), attrs),
+                _timed("context_precision", evaluate_context_precision(query, chunks, answer, self.client), attrs),
+                _timed("context_recall", evaluate_context_recall(query, chunks, answer, self.client), attrs),
             )
             total_ms = round((time.perf_counter() - started) * 1000)
             scores = {name: value for name, value, _ in results}
@@ -95,10 +115,12 @@ class EvaluationJudge:
             for name, value in scores.items():
                 span.set_attribute(name, value)
             span.set_attribute("overall_score", overall)
-            span.set_attribute("run_id", run_id)
+            span.set_attribute("latency_ms", total_ms)
 
             judge_model = "llm-judge" if llm_available() else "heuristic-fallback"
+            span.set_attribute("model", judge_model)
             await self._store(run_id, scores, overall, judge_model)
+            await _update_gauges(run["pipeline_id"])
             await update_calibration_flag(run_id)
             created_pair = overall > threshold and await self._store_training_pair(run, context)
 
@@ -119,15 +141,13 @@ class EvaluationJudge:
             "judge_model = EXCLUDED.judge_model, evaluated_at = NOW()",
             run_id, scores["faithfulness"], scores["answer_relevance"], scores["context_precision"],
             scores["context_recall"], overall, judge_model,
-
+        )
         try:
-            import json as _json
             r = Redis.from_url(get_settings().redis_url)
-            await r.publish("evaluations:new", _json.dumps({"run_id": str(run_id)}))
+            await r.publish("evaluations:new", json.dumps({"run_id": str(run_id)}))
             await r.aclose()
         except Exception:
             pass
-        )
 
     async def _store_training_pair(self, run, context: str) -> bool:
         metadata = _as_dict(run["metadata"])
@@ -155,6 +175,7 @@ async def consume_forever(judge: EvaluationJudge, stop: asyncio.Event) -> None:
                 logger.exception("Evaluation failed for %s", item[1])
     finally:
         await redis.aclose()
+
 
 async def update_calibration_flag(run_id: str) -> bool | None:
     pool = get_pool()

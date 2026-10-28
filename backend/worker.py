@@ -11,6 +11,7 @@ from config import get_settings
 from db import pool
 from pipelines.ingestion.pipeline import process_document
 from pipelines.finetuning.job_manager import poll_finetune_job
+from prometheus_client import start_http_server
 
 logger = logging.getLogger("neuroflow.worker")
 settings = get_settings()
@@ -23,6 +24,7 @@ async def ingest_document(ctx, document_id: str, file_path: str, source_type: st
 
 
 async def startup(ctx) -> None:
+    start_http_server(9100)
     await pool.create_pool()
     ctx["stop_eval"] = asyncio.Event()
     ctx["eval_task"] = asyncio.create_task(

@@ -1,0 +1,47 @@
+{
+  "title": "NeuroFlow - Quality Monitor",
+  "uid": "nf-quality",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-7d", "to": "now" },
+  "panels": [
+    {
+      "id": 1, "type": "timeseries", "title": "Rolling 24h faithfulness per pipeline",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "fieldConfig": { "defaults": { "min": 0, "max": 1 }, "overrides": [] },
+      "targets": [{ "refId": "A", "expr": "neuroflow_eval_faithfulness", "legendFormat": "{{pipeline_id}}" }]
+    },
+    {
+      "id": 2, "type": "timeseries", "title": "Rolling 24h overall score per pipeline",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "fieldConfig": { "defaults": { "min": 0, "max": 1 }, "overrides": [] },
+      "targets": [{ "refId": "A", "expr": "neuroflow_eval_overall", "legendFormat": "{{pipeline_id}}" }]
+    },
+    {
+      "id": 3, "type": "timeseries", "title": "Overall score trend (7 days)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "fieldConfig": { "defaults": { "min": 0, "max": 1 }, "overrides": [] },
+      "targets": [{ "refId": "A", "expr": "avg(neuroflow_eval_overall)", "legendFormat": "all pipelines" }]
+    },
+    {
+      "id": 4, "type": "timeseries", "title": "Documents ingested per day",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "bars", "fillOpacity": 60 } }, "overrides": [] },
+      "targets": [{ "refId": "A", "expr": "sum by (source_type) (increase(neuroflow_ingestion_docs_total[1d]))", "legendFormat": "{{source_type}}" }]
+    },
+    {
+      "id": 5, "type": "table", "title": "Fine-tuning job history",
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "postgres" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
+      "targets": [{
+        "refId": "A", "format": "table", "editorMode": "code", "rawQuery": true,
+        "rawSql": "SELECT created_at, base_model, status, training_pair_count, provider_job_id, completed_at FROM finetune_jobs ORDER BY created_at DESC LIMIT 20"
+      }]
+    }
+  ]
+}

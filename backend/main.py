@@ -20,6 +20,8 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from prometheus_client import CONTENT_TYPE_LATEST, Gauge, generate_latest
 from arq import create_pool
 from arq.connections import RedisSettings
+from monitoring.metrics import queue_depth as queue_depth_gauge, active_circuit_breakers_open
+from monitoring.metrics import eval_faithfulness, eval_overall
 
 
 
@@ -142,4 +144,21 @@ async def get_health():
 
 @app.get("/metrics")
 async def get_metrics():
+        rows = await get_pool().fetch(
+            "SELECT r.pipeline_id::text AS pid, avg(e.faithfulness) AS f, avg(e.overall_score) AS o "
+            "FROM evaluations e JOIN pipeline_runs r ON r.id = e.run_id "
+            "WHERE e.evaluated_at > now() - interval '24 hours' GROUP BY r.pipeline_id"
+        )
+        for r in rows:
+            eval_faithfulness.labels(pipeline_id=r["pid"]).set(float(r["f"] or 0))
+            eval_overall.labels(pipeline_id=r["pid"]).set(float(r["o"] or 0))
+    try:
+        queue_depth_gauge.set(await queue_depth())
+        open_count = 0
+        for name in ("openai", "anthropic"):
+            if (await CircuitBreaker(name).status())["state"] == "open":
+                open_count += 1
+        active_circuit_breakers_open.set(open_count)
+    except Exception:
+        pass
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)

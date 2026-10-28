@@ -4,6 +4,8 @@ from contextlib import asynccontextmanager
 
 from datetime import datetime, timezone
 
+from monitoring.metrics import circuit_breaker_trips
+
 import redis.asyncio as aioredis
 
 CLOSED, OPEN, HALF_OPEN = "closed", "open", "half_open"
@@ -47,6 +49,7 @@ class CircuitBreaker:
             if time.time() - opened_at < self.recovery_timeout:
                 raise CircuitOpenError(f"circuit '{self.name}' is open")
             await r.set(self.k_state, HALF_OPEN)
+            circuit_breaker_trips.labels(provider=self.name).inc()
             await r.set(self.k_half, 0)
             state = HALF_OPEN
         if state == HALF_OPEN:

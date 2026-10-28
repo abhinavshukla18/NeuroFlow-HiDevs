@@ -2,10 +2,14 @@ from redis.asyncio import Redis
 from opentelemetry import trace
 
 from config import Settings, get_settings
+from monitoring.metrics import llm_cost, lm_calls_total
 from providers.anthropic_provider import AnthropicProvider
 from providers.base import BaseLLMProvider, ChatMessage, GenerationResult
 from providers.openai_provider import OpenAIProvider
 from providers.router import ModelConfig, ModelRouter, RoutingCriteria
+from resilience.circuit_breaker import circuit_breaker
+from resilience.rate_limiter import acquire_llm_token
+from resilience.timeout_manager import with_timeout
 
 tracer = trace.get_tracer("neuroflow.providers")
 
@@ -52,12 +56,19 @@ class NeuroFlowClient:
 
         with tracer.start_as_current_span("llm.chat") as span:
             span.set_attribute("model", cfg.model)
-            result = await provider.complete(messages, **kwargs)
+            if cfg.provider == "openai":
+                await acquire_llm_token("openai")
+            async with circuit_breaker(cfg.provider):
+                result = await with_timeout("chat_completion", provider.complete(messages, **kwargs))
             span.set_attribute("input_tokens", result.input_tokens)
             span.set_attribute("output_tokens", result.output_tokens)
             span.set_attribute("cost_usd", result.cost_usd)
             span.set_attribute("latency_ms", result.latency_ms)
 
+        lm_calls_total.labels(
+            provider=cfg.provider, model=cfg.model, task_type=criteria.task_type or "chat"
+        ).inc()
+        llm_cost.labels(model=cfg.model).observe(result.cost_usd)
         await self._record(cfg.model, result.cost_usd)
         return result
 
@@ -66,7 +77,10 @@ class NeuroFlowClient:
         provider = self._provider(cfg)
 
         with tracer.start_as_current_span("llm.embed") as span:
-            vectors = await provider.embed(texts)
+            if cfg.provider == "openai":
+                await acquire_llm_token("openai")
+            async with circuit_breaker(cfg.provider):
+                vectors = await with_timeout("embedding", provider.embed(texts))
             approx_tokens = sum(len(t) for t in texts) // 4  # estimate: ~4 chars per token
             cost = approx_tokens * cfg.input_price / 1_000_000
             span.set_attribute("model", cfg.model)
@@ -74,6 +88,8 @@ class NeuroFlowClient:
             span.set_attribute("output_tokens", 0)
             span.set_attribute("cost_usd", cost)
 
+        lm_calls_total.labels(provider=cfg.provider, model=cfg.model, task_type="embedding").inc()
+        llm_cost.labels(model=cfg.model).observe(cost)
         await self._record(cfg.model, cost)
         return vectors
 

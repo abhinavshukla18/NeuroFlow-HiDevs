@@ -1,0 +1,70 @@
+{
+  "title": "NeuroFlow - System Overview",
+  "uid": "nf-system",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "15s",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "id": 1, "type": "timeseries", "title": "Queries per minute",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [{ "refId": "A", "expr": "sum(rate(neuroflow_queries_total[1m])) * 60", "legendFormat": "queries/min" }]
+    },
+    {
+      "id": 2, "type": "timeseries", "title": "Retrieval latency (P50 / P95)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.5, sum(rate(neuroflow_retrieval_latency_seconds_bucket{strategy=\"total\"}[5m])) by (le))", "legendFormat": "P50" },
+        { "refId": "B", "expr": "histogram_quantile(0.95, sum(rate(neuroflow_retrieval_latency_seconds_bucket{strategy=\"total\"}[5m])) by (le))", "legendFormat": "P95" }
+      ]
+    },
+    {
+      "id": 3, "type": "timeseries", "title": "Generation latency (P50 / P95)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.5, sum(rate(neuroflow_generation_latency_seconds_bucket[5m])) by (le))", "legendFormat": "P50" },
+        { "refId": "B", "expr": "histogram_quantile(0.95, sum(rate(neuroflow_generation_latency_seconds_bucket[5m])) by (le))", "legendFormat": "P95" }
+      ]
+    },
+    {
+      "id": 4, "type": "timeseries", "title": "LLM cost per hour (USD)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "currencyUSD" }, "overrides": [] },
+      "targets": [{ "refId": "A", "expr": "sum(increase(neuroflow_llm_cost_usd_sum[1h]))", "legendFormat": "cost / hour" }]
+    },
+    {
+      "id": 5, "type": "stat", "title": "Queue depth",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 16 },
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [
+        { "color": "green", "value": null }, { "color": "yellow", "value": 50 }, { "color": "red", "value": 100 } ] } }, "overrides": [] },
+      "targets": [{ "refId": "A", "expr": "neuroflow_queue_depth" }]
+    },
+    {
+      "id": 6, "type": "stat", "title": "Circuit breakers",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 16 },
+      "fieldConfig": { "defaults": {
+        "mappings": [
+          { "type": "value", "options": { "0": { "text": "ALL CLOSED", "color": "green" } } },
+          { "type": "range", "options": { "from": 1, "to": 100, "result": { "text": "OPEN", "color": "red" } } }
+        ],
+        "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }
+      }, "overrides": [] },
+      "targets": [{ "refId": "A", "expr": "neuroflow_circuit_breakers_open" }]
+    },
+    {
+      "id": 7, "type": "timeseries", "title": "Circuit breaker trips per provider (1h)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 16 },
+      "targets": [{ "refId": "A", "expr": "sum by (provider) (increase(neuroflow_circuit_breaker_trips_total[1h]))", "legendFormat": "{{provider}}" }]
+    }
+  ]
+}

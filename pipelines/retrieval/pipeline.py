@@ -1,9 +1,16 @@
+import time
+
+from opentelemetry import trace
+
 from config import get_settings
+from monitoring.metrics import retrieval_latency
 from pipelines.retrieval import RetrievalResult
 from pipelines.retrieval.context_assembler import DEFAULT_TOKEN_BUDGET, assemble_context
 from pipelines.retrieval.query_processor import process_query
 from pipelines.retrieval.reranker import Reranker
 from pipelines.retrieval.retriever import Retriever, default_embed
+
+tracer = trace.get_tracer("neuroflow.retrieval")
 
 
 class RetrievalPipeline:
@@ -43,16 +50,41 @@ class RetrievalPipeline:
             return fused[:k]
         return await self.reranker.rerank(query, fused, top_k=k)
 
-    async def run(self, query: str, k: int = 10, token_budget: int = DEFAULT_TOKEN_BUDGET, retrieval=None) -> dict:
-        analysis, fused = await self._search(query, 20, retrieval)
-        if retrieval is not None and retrieval.reranker == "none":
-            results = fused[:k]
-        else:
-            results = await self.reranker.rerank(query, fused, top_k=k)
-        return {
-            "query_type": analysis.query_type,
-            "filters": analysis.filters,
-            "queries": analysis.all_queries,
-            "results": results,
-            "context": assemble_context(results, token_budget),
-        }
+    async def run(
+        self,
+        query: str,
+        k: int = 10,
+        token_budget: int = DEFAULT_TOKEN_BUDGET,
+        retrieval=None,
+        pipeline_id: str | None = None,
+        run_id: str | None = None,
+    ) -> dict:
+        attrs = {"pipeline_id": pipeline_id or "", "run_id": run_id or ""}
+        with tracer.start_as_current_span("retrieval.pipeline", attributes=attrs) as root:
+            started = time.perf_counter()
+            analysis, fused = await self._search(query, 20, retrieval)
+            retrieval_latency.labels(strategy="search").observe(time.perf_counter() - started)
+
+            with tracer.start_as_current_span("retrieval.rerank", attributes=attrs) as sp:
+                t = time.perf_counter()
+                if retrieval is not None and retrieval.reranker == "none":
+                    results = fused[:k]
+                else:
+                    results = await self.reranker.rerank(query, fused, top_k=k)
+                sp.set_attribute("chunk_count", len(results))
+                retrieval_latency.labels(strategy="rerank").observe(time.perf_counter() - t)
+
+            with tracer.start_as_current_span("retrieval.assemble", attributes=attrs) as sp:
+                context = assemble_context(results, token_budget)
+                sp.set_attribute("chunk_count", len(context.chunks_used))
+                sp.set_attribute("token_count", len(context.context) // 4)
+
+            root.set_attribute("chunk_count", len(results))
+            retrieval_latency.labels(strategy="total").observe(time.perf_counter() - started)
+            return {
+                "query_type": analysis.query_type,
+                "filters": analysis.filters,
+                "queries": analysis.all_queries,
+                "results": results,
+                "context": context,
+            }
