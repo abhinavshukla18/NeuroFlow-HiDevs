@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from db.pool import get_pool
 from resilience.circuit_breaker import CircuitBreaker, get_redis
 from resilience.backpressure import queue_depth
+from fastapi.middleware.cors import CORSMiddleware
 
 from fastapi import FastAPI, Response
 from fastapi.responses import JSONResponse
@@ -22,7 +23,7 @@ from arq.connections import RedisSettings
 
 
 
-from api import ingest, query, runs, pipelines, compare, analytics
+from api import ingest, query, runs, pipelines, compare, analytics, evaluations, chunks
 from api.finetune import router as finetune_router
 
 from config import get_settings
@@ -71,6 +72,12 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="NeuroFlow API", version="0.1.0", lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 app.add_middleware(OpenTelemetryMiddleware)
 app.include_router(query.router)
 app.include_router(runs.router)
@@ -78,7 +85,8 @@ app.include_router(pipelines.router)
 app.include_router(compare.router)
 app.include_router(analytics.router)
 app.include_router(finetune_router)
-
+app.include_router(evaluations.router)
+app.include_router(chunks.router)
 
 @app.get("/health")
 async def get_health():

@@ -119,6 +119,14 @@ class EvaluationJudge:
             "judge_model = EXCLUDED.judge_model, evaluated_at = NOW()",
             run_id, scores["faithfulness"], scores["answer_relevance"], scores["context_precision"],
             scores["context_recall"], overall, judge_model,
+
+        try:
+            import json as _json
+            r = Redis.from_url(get_settings().redis_url)
+            await r.publish("evaluations:new", _json.dumps({"run_id": str(run_id)}))
+            await r.aclose()
+        except Exception:
+            pass
         )
 
     async def _store_training_pair(self, run, context: str) -> bool:

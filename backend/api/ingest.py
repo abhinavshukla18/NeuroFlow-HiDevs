@@ -119,3 +119,21 @@ async def get_document(document_id: uuid.UUID):
         "metadata": json.loads(row["metadata"]) if isinstance(row["metadata"], str) else row["metadata"],
         "created_at": row["created_at"].isoformat(),
     }
+
+@router.get("/documents")
+async def list_documents():
+    rows = await get_pool().fetch(
+        "SELECT id, filename, source_type, status, chunk_count, created_at "
+        "FROM documents ORDER BY created_at DESC LIMIT 200"
+    )
+    return [
+        {
+            "document_id": str(r["id"]),
+            "filename": r["filename"],
+            "source_type": r["source_type"],
+            "status": r["status"],
+            "chunk_count": r["chunk_count"],
+            "created_at": r["created_at"].isoformat(),
+        }
+        for r in rows
+    ]
