@@ -1,9 +1,9 @@
 import uuid
 
+from db.pool import get_pool
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from db.pool import get_pool
 from evaluation.judge import update_calibration_flag
 
 router = APIRouter()

@@ -9,9 +9,9 @@ import asyncio
 import logging
 
 import httpx
+from config import get_settings
 from redis.asyncio import Redis
 
-from config import get_settings
 from db.pool import get_pool
 
 logger = logging.getLogger(__name__)

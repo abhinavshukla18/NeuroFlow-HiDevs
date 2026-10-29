@@ -1,11 +1,10 @@
-import json
 import uuid
 
+from db.pool import get_pool
 from fastapi import APIRouter, Query
+from providers.router import DEFAULT_MODELS
 
 from api.pipelines import load_pipeline
-from db.pool import get_pool
-from providers.router import DEFAULT_MODELS
 
 router = APIRouter()
 PRICES = {m["model"]: (m["input_price"], m["output_price"]) for m in DEFAULT_MODELS}

@@ -5,7 +5,6 @@ the FastAPI lifespan function in main.py. Everything else calls get_pool().
 """
 
 import asyncpg
-
 from config import get_settings
 
 _pool: asyncpg.Pool | None = None

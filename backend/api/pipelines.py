@@ -2,11 +2,11 @@ import json
 import uuid
 
 import asyncpg
-from fastapi import APIRouter, HTTPException
-from pydantic import ValidationError
-
 from db.pool import get_pool
+from fastapi import APIRouter, Depends, HTTPException
 from models.pipeline import PipelineConfig
+from pydantic import ValidationError
+from security.auth import require_scope
 
 router = APIRouter()
 
@@ -35,7 +35,9 @@ async def load_pipeline(pipeline_id: uuid.UUID):
     return row
 
 
-@router.post("/pipelines", status_code=201)
+@router.post("/pipelines", status_code=201, dependencies=[Depends(require_scope("admin"))])
+@router.patch("/pipelines/{pipeline_id}", dependencies=[Depends(require_scope("admin"))])
+@router.delete("/pipelines/{pipeline_id}", dependencies=[Depends(require_scope("admin"))])
 async def create_pipeline(cfg: PipelineConfig):
     stored = json.dumps(cfg.stored())
     try:

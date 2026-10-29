@@ -1,14 +1,15 @@
+import asyncio
 import hashlib
 import json
 import uuid
 from pathlib import Path
-from urllib.parse import urlparse
-
-from fastapi import APIRouter, HTTPException, Request, Depends, Response
-from resilience.rate_limiter import ip_limit
-from resilience.backpressure import check_backpressure
 
 from db.pool import get_pool
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from resilience.backpressure import check_backpressure
+from resilience.rate_limiter import ip_limit
+from security.auth import require_scope
+from security.validators import clean_text, validate_upload, validate_url
 
 router = APIRouter()
 
@@ -38,7 +39,7 @@ async def _save_upload(upload, temp_path: Path) -> str:
     return sha.hexdigest()
 
 
-@router.post("/ingest", dependencies=[Depends(ip_limit("ingest", 10, 3600))])
+@router.post("/ingest", dependencies=[Depends(ip_limit("ingest", 10, 3600)), Depends(require_scope("ingest"))])
 async def ingest(request: Request, response: Response):
     warning = await check_backpressure(response)
 
@@ -52,9 +53,9 @@ async def ingest(request: Request, response: Response):
         except ValueError:
             raise HTTPException(400, "Request body must be valid JSON")
         url = (body or {}).get("url", "")
-        parsed = urlparse(url)
-        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        if not isinstance(url, str):
             raise HTTPException(400, "A valid http(s) 'url' is required")
+        await asyncio.to_thread(validate_url, url)
         source_type, filename, file_path = "url", url, url
         content_hash = hashlib.sha256(url.encode()).hexdigest()
         metadata = {"url": url}
@@ -63,14 +64,20 @@ async def ingest(request: Request, response: Response):
         upload = form.get("file")
         if upload is None or not hasattr(upload, "read"):
             raise HTTPException(400, "Field 'file' is required")
-        filename = Path(upload.filename or "upload").name
-        ext = Path(filename).suffix.lower()
+        raw_name = Path(upload.filename or "upload").name
+        ext = Path(raw_name).suffix.lower()
+        filename = clean_text(raw_name)[:200]
         source_type = EXT_TO_TYPE.get(ext)
         if source_type is None:
             raise HTTPException(415, f"Unsupported file type '{ext}'. Allowed: {sorted(EXT_TO_TYPE)}")
         UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
         temp_path = UPLOAD_DIR / f"tmp-{document_id}"
         content_hash = await _save_upload(upload, temp_path)
+        try:
+            validate_upload(upload.content_type, ext, temp_path)
+        except HTTPException:
+            temp_path.unlink(missing_ok=True)
+            raise
         file_path = str(UPLOAD_DIR / f"{document_id}{ext}")
         metadata = {"original_filename": filename}
     else:
@@ -119,6 +126,7 @@ async def get_document(document_id: uuid.UUID):
         "metadata": json.loads(row["metadata"]) if isinstance(row["metadata"], str) else row["metadata"],
         "created_at": row["created_at"].isoformat(),
     }
+
 
 @router.get("/documents")
 async def list_documents():

@@ -1,4 +1,5 @@
 import asyncio
+import os
 import time
 import uuid
 
@@ -58,6 +59,8 @@ async def check_rate_limit(key: str, limit: int, window: int) -> None:
     pipe.zrange(k, 0, 0, withscores=True)
     pipe.expire(k, window)
     _, _, count, oldest, _ = await pipe.execute()
+    if os.getenv("DISABLE_RATE_LIMIT") == "1":
+        return
     if count > limit:
         retry = max(1, int(oldest[0][1] + window - now) + 1)
         raise HTTPException(

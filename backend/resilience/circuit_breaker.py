@@ -1,12 +1,10 @@
 import os
 import time
 from contextlib import asynccontextmanager
-
 from datetime import datetime, timezone
 
-from monitoring.metrics import circuit_breaker_trips
-
 import redis.asyncio as aioredis
+from monitoring.metrics import circuit_breaker_trips
 
 CLOSED, OPEN, HALF_OPEN = "closed", "open", "half_open"
 

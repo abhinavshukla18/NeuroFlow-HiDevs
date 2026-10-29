@@ -1,15 +1,15 @@
-from redis.asyncio import Redis
-from opentelemetry import trace
-
 from config import Settings, get_settings
 from monitoring.metrics import llm_cost, lm_calls_total
+from opentelemetry import trace
+from redis.asyncio import Redis
+from resilience.circuit_breaker import circuit_breaker
+from resilience.rate_limiter import acquire_llm_token
+from resilience.timeout_manager import with_timeout
+
 from providers.anthropic_provider import AnthropicProvider
 from providers.base import BaseLLMProvider, ChatMessage, GenerationResult
 from providers.openai_provider import OpenAIProvider
 from providers.router import ModelConfig, ModelRouter, RoutingCriteria
-from resilience.circuit_breaker import circuit_breaker
-from resilience.rate_limiter import acquire_llm_token
-from resilience.timeout_manager import with_timeout
 
 tracer = trace.get_tracer("neuroflow.providers")
 

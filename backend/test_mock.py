@@ -4,16 +4,15 @@ import time
 from types import SimpleNamespace
 
 import httpx
-from openai import RateLimitError
-from opentelemetry import trace
-from redis.asyncio import Redis
-
 import main  # noqa: F401  (sets up tracing to Jaeger)
 from config import get_settings
+from openai import RateLimitError
+from opentelemetry import trace
 from providers.base import ChatMessage, GenerationResult
 from providers.client import NeuroFlowClient
 from providers.openai_provider import OpenAIProvider
 from providers.router import ROUTER_KEY, ModelRouter, RoutingCriteria
+from redis.asyncio import Redis
 
 MSGS = [ChatMessage(role="user", content="hi")]
 

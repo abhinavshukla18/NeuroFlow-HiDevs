@@ -1,17 +1,16 @@
-import logging
 import asyncio
-
-
-from arq.connections import RedisSettings
-from arq.worker import run_worker
-from evaluation.judge import EvaluationJudge, consume_forever
+import logging
 
 import main  # noqa: F401  (sets up OpenTelemetry tracing)
+from arq.connections import RedisSettings
+from arq.worker import run_worker
 from config import get_settings
 from db import pool
-from pipelines.ingestion.pipeline import process_document
-from pipelines.finetuning.job_manager import poll_finetune_job
 from prometheus_client import start_http_server
+
+from evaluation.judge import EvaluationJudge, consume_forever
+from pipelines.finetuning.job_manager import poll_finetune_job
+from pipelines.ingestion.pipeline import process_document
 
 logger = logging.getLogger("neuroflow.worker")
 settings = get_settings()

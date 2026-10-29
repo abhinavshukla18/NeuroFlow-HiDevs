@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 
 from config import get_settings
+
 from db.pool import get_pool
 
 logger = logging.getLogger(__name__)

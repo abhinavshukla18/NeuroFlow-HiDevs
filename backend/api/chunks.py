@@ -1,9 +1,8 @@
-import uuid
 import json
-
-from fastapi import APIRouter, HTTPException
+import uuid
 
 from db.pool import get_pool
+from fastapi import APIRouter, HTTPException
 
 router = APIRouter()
 

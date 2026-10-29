@@ -1,12 +1,14 @@
 from uuid import UUID, uuid4
 
+from db.pool import get_pool
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from db.pool import get_pool
-
 from pipelines.finetuning.extractor import (
-    extract_training_pairs, format_pair, mark_included, write_jsonl,
+    extract_training_pairs,
+    format_pair,
+    mark_included,
+    write_jsonl,
 )
 from pipelines.finetuning.job_manager import submit_finetune_job
 from pipelines.finetuning.tracker import run_url, start_training_job

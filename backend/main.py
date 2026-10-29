@@ -2,34 +2,30 @@
 
 import logging
 import time
+import uuid
 from contextlib import asynccontextmanager
 
+from api import analytics, auth, chunks, compare, evaluations, ingest, pipelines, query, runs
+from api.finetune import router as finetune_router
+from arq import create_pool
+from arq.connections import RedisSettings
+from config import get_settings
+from db import health, migrations, pool
 from db.pool import get_pool
-from resilience.circuit_breaker import CircuitBreaker, get_redis
-from resilience.backpressure import queue_depth
+from fastapi import Depends, FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
-
-from fastapi import FastAPI, Response
 from fastapi.responses import JSONResponse
+from monitoring.metrics import active_circuit_breakers_open, eval_faithfulness, eval_overall
+from monitoring.metrics import queue_depth as queue_depth_gauge
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
-from opentelemetry.instrumentation.asgi import OpenTelemetryMiddleware
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from prometheus_client import CONTENT_TYPE_LATEST, Gauge, generate_latest
-from arq import create_pool
-from arq.connections import RedisSettings
-from monitoring.metrics import queue_depth as queue_depth_gauge, active_circuit_breakers_open
-from monitoring.metrics import eval_faithfulness, eval_overall
-
-
-
-from api import ingest, query, runs, pipelines, compare, analytics, evaluations, chunks
-from api.finetune import router as finetune_router
-
-from config import get_settings
-from db import health, migrations, pool
+from resilience.backpressure import queue_depth
+from resilience.circuit_breaker import CircuitBreaker, get_redis
+from security.auth import get_current_user, require_scope
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("neuroflow")
@@ -80,15 +76,26 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-app.add_middleware(OpenTelemetryMiddleware)
-app.include_router(query.router)
-app.include_router(runs.router)
-app.include_router(pipelines.router)
-app.include_router(compare.router)
-app.include_router(analytics.router)
-app.include_router(finetune_router)
-app.include_router(evaluations.router)
-app.include_router(chunks.router)
+@app.middleware("http")
+async def security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000"
+    response.headers["Content-Security-Policy"] = "default-src 'self'"
+    response.headers["X-Request-ID"] = str(uuid.uuid4())
+    return response
+
+app.include_router(auth.router)
+app.include_router(ingest.router, dependencies=[Depends(get_current_user)])
+app.include_router(query.router, dependencies=[Depends(require_scope("query"))])
+app.include_router(runs.router, dependencies=[Depends(require_scope("query"))])
+app.include_router(pipelines.router, dependencies=[Depends(get_current_user)])
+app.include_router(compare.router, dependencies=[Depends(require_scope("query"))])
+app.include_router(analytics.router, dependencies=[Depends(require_scope("query"))])
+app.include_router(evaluations.router, dependencies=[Depends(require_scope("query"))])
+app.include_router(chunks.router, dependencies=[Depends(require_scope("query"))])
+app.include_router(finetune_router, dependencies=[Depends(require_scope("admin"))])
 
 @app.get("/health")
 async def get_health():
@@ -144,6 +151,7 @@ async def get_health():
 
 @app.get("/metrics")
 async def get_metrics():
+    try:
         rows = await get_pool().fetch(
             "SELECT r.pipeline_id::text AS pid, avg(e.faithfulness) AS f, avg(e.overall_score) AS o "
             "FROM evaluations e JOIN pipeline_runs r ON r.id = e.run_id "
@@ -152,7 +160,6 @@ async def get_metrics():
         for r in rows:
             eval_faithfulness.labels(pipeline_id=r["pid"]).set(float(r["f"] or 0))
             eval_overall.labels(pipeline_id=r["pid"]).set(float(r["o"] or 0))
-    try:
         queue_depth_gauge.set(await queue_depth())
         open_count = 0
         for name in ("openai", "anthropic"):

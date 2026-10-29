@@ -1,11 +1,10 @@
 import json
 import uuid
 
-from fastapi import APIRouter, HTTPException, Query
-from sse_starlette.sse import EventSourceResponse
-
 from db.pool import get_pool
+from fastapi import APIRouter, HTTPException, Query
 from resilience.circuit_breaker import get_redis
+from sse_starlette.sse import EventSourceResponse
 
 router = APIRouter()
 CHANNEL = "evaluations:new"
