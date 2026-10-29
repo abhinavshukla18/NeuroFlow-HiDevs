@@ -48,6 +48,7 @@ services:
     ports: ["8000:8000"]
     environment:
       MLFLOW_TRACKING_URI: http://mlflow:5000
+      DISABLE_RATE_LIMIT: ${DISABLE_RATE_LIMIT:-0}
     depends_on:
       postgres:
         condition: service_healthy
@@ -85,11 +86,6 @@ services:
       COLLECTOR_OTLP_ENABLED: "true"
     ports: ["16686:16686", "4317:4317"]
 
-volumes:
-  postgres_data:
-  uploads:
-  models:
-
   prometheus:
     image: prom/prometheus:latest
     ports: ["9090:9090"]
@@ -111,3 +107,8 @@ volumes:
       - ./grafana:/var/lib/grafana/dashboards:ro
     depends_on:
       - prometheus
+
+volumes:
+  postgres_data:
+  uploads:
+  models:

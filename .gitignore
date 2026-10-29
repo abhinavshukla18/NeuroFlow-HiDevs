@@ -44,4 +44,9 @@ url.json
 build.log
 
 rating.json
-rating_bad.json
+rating_bad.jsoninfra/nginx/certs/*
+!infra/nginx/certs/.gitkeep
+infra/nginx/certs/*
+!infra/nginx/certs/.gitkeep
+infra/nginx/certs/*
+!infra/nginx/certs/.gitkeep

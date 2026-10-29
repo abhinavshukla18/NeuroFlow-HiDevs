@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { api, API_URL } from "@/lib/api";
+import { api, API_URL, withToken } from "@/lib/api";
 
 const METRICS = ["faithfulness", "answer_relevance", "context_precision", "context_recall"] as const;
 type Metric = (typeof METRICS)[number];
@@ -36,7 +36,7 @@ export default function Evaluations() {
   });
 
   useEffect(() => {
-    const es = new EventSource(`${API_URL}/evaluations/stream`);
+    const es = new EventSource(withToken(`${API_URL}/evaluations/stream`));
     es.onmessage = (e) => setLive((prev) => [JSON.parse(e.data), ...prev]);
     return () => es.close();
   }, []);

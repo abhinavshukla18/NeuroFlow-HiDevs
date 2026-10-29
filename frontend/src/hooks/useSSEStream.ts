@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { API_URL } from "@/lib/api";
+import { API_URL, withToken } from "@/lib/api";
 
 export type StreamState = {
   status: "idle" | "retrieving" | "streaming" | "done" | "error";
@@ -20,7 +20,7 @@ export function useSSEStream() {
   const start = useCallback((runId: string) => {
     esRef.current?.close();
     setState({ ...initial, status: "retrieving" });
-    const es = new EventSource(`${API_URL}/query/${runId}/stream`);
+    const es = new EventSource(withToken(`${API_URL}/query/${runId}/stream`));
     esRef.current = es;
 
     es.onmessage = (e) => {
