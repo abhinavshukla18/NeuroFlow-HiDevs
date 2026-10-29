@@ -3,6 +3,8 @@
 import logging
 import time
 import uuid
+import os
+
 from contextlib import asynccontextmanager
 
 from api import analytics, auth, chunks, compare, evaluations, ingest, pipelines, query, runs
@@ -72,7 +74,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="NeuroFlow API", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=os.getenv("CORS_ORIGINS", "http://localhost:3000").split(","),
     allow_methods=["*"],
     allow_headers=["*"],
 )

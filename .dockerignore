@@ -11,14 +11,14 @@ sample.*
 frontend/.next
 tests
 training_data
-infra
 frontend/node_modules
 frontend/.next
 tests
 training_data
-infra
 frontend/node_modules
 frontend/.next
 tests
 training_data
-infra
+infra/nginx
+infra/grafana
+infra/prometheus
