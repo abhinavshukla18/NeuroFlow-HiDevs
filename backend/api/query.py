@@ -15,9 +15,11 @@ router = APIRouter()
 
 
 class QueryRequest(BaseModel):
-    query: str = Field(max_length=5000)
-    pipeline_id: uuid.UUID | None = None
-    stream: bool = False
+    query: str = Field(max_length=5000, description="The question to answer, up to 5000 characters.",
+                       examples=["What is the main topic of the document?"])
+    pipeline_id: uuid.UUID | None = Field(None, description="Pipeline to use. Omit for the default pipeline.",
+                                          examples=["3fa85f64-5717-4562-b3fc-2c963f66afa6"])
+    stream: bool = Field(False, description="If true, returns a run_id and you read tokens from stream_url.")
 
     @field_validator("query")
     @classmethod

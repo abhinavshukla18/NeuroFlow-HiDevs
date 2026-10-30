@@ -6,8 +6,8 @@ router = APIRouter()
 
 
 class TokenRequest(BaseModel):
-    client_id: str = Field(max_length=100)
-    client_secret: str = Field(max_length=200)
+    client_id: str = Field(max_length=100, description="Client identifier.", examples=["admin-client"])
+    client_secret: str = Field(max_length=200, description="Client secret.", examples=["your-client-secret"])
 
 
 @router.post("/auth/token")

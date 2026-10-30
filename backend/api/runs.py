@@ -10,7 +10,7 @@ router = APIRouter()
 
 
 class RatingRequest(BaseModel):
-    rating: int = Field(ge=1, le=5)
+    rating: int = Field(ge=1, le=5, description="1 (bad) to 5 (excellent).", examples=[5])
 
 
 @router.patch("/runs/{run_id}/rating")

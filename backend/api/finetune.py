@@ -2,7 +2,7 @@ from uuid import UUID, uuid4
 
 from db.pool import get_pool
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from pipelines.finetuning.extractor import (
     extract_training_pairs,
@@ -25,9 +25,9 @@ def _redis(request: Request):
 
 
 class FinetuneRequest(BaseModel):
-    base_model: str = "gpt-4o-mini"
-    domain: str = "general"
-    limit: int = 1000
+    base_model: str = Field("gpt-4o-mini", description="Model to fine-tune.", examples=["gpt-4o-mini"])
+    domain: str = Field("general", description="Task type the tuned model is routed for.", examples=["general"])
+    limit: int = Field(1000, description="Maximum number of candidate pairs to consider.", examples=[1000])
 
 
 @router.post("/jobs")

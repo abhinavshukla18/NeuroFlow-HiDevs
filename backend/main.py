@@ -7,7 +7,7 @@ import os
 
 from contextlib import asynccontextmanager
 
-from api import analytics, auth, chunks, compare, evaluations, ingest, pipelines, query, runs
+from api import analytics, auth, chunks, compare, evaluations, ingest, pipelines, query, runs, admin
 from api.finetune import router as finetune_router
 from arq import create_pool
 from arq.connections import RedisSettings
@@ -98,6 +98,7 @@ app.include_router(analytics.router, dependencies=[Depends(require_scope("query"
 app.include_router(evaluations.router, dependencies=[Depends(require_scope("query"))])
 app.include_router(chunks.router, dependencies=[Depends(require_scope("query"))])
 app.include_router(finetune_router, dependencies=[Depends(require_scope("admin"))])
+app.include_router(admin.router, dependencies=[Depends(require_scope("admin"))])
 
 @app.get("/health")
 async def get_health():
@@ -171,3 +172,5 @@ async def get_metrics():
     except Exception:
         pass
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+install_openapi(app)

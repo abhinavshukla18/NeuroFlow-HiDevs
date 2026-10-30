@@ -8,6 +8,9 @@ from config import get_settings
 from db import pool
 from prometheus_client import start_http_server
 
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from jobs.retention import run_retention
+
 from evaluation.judge import EvaluationJudge, consume_forever
 from pipelines.finetuning.job_manager import poll_finetune_job
 from pipelines.ingestion.pipeline import process_document
@@ -25,6 +28,10 @@ async def ingest_document(ctx, document_id: str, file_path: str, source_type: st
 async def startup(ctx) -> None:
     start_http_server(9100)
     await pool.create_pool()
+    scheduler = AsyncIOScheduler()
+    scheduler.add_job(run_retention, "cron", hour=3, minute=0)
+    scheduler.start()
+    ctx["scheduler"] = scheduler
     ctx["stop_eval"] = asyncio.Event()
     ctx["eval_task"] = asyncio.create_task(
         consume_forever(EvaluationJudge.from_settings(), ctx["stop_eval"])
@@ -33,6 +40,7 @@ async def startup(ctx) -> None:
 
 
 async def shutdown(ctx) -> None:
+    ctx["scheduler"].shutdown(wait=False)
     ctx["stop_eval"].set()
     try:
         await asyncio.wait_for(ctx["eval_task"], timeout=10)

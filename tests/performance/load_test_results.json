@@ -1,0 +1,12 @@
+{
+  "users": 50,
+  "run_time": 300,
+  "total_requests": 75,
+  "failures": 75,
+  "error_rate_percent": 100.0,
+  "query_p50_ms": null,
+  "query_p95_ms": null,
+  "query_p99_ms": null,
+  "requests_per_second": 5.64,
+  "passed": false
+}
