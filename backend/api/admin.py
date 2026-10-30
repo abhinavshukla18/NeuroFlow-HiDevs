@@ -1,6 +1,5 @@
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
-
 from resilience.circuit_breaker import get_redis
 
 router = APIRouter()

@@ -1,13 +1,12 @@
 """NeuroFlow API: async FastAPI app."""
 
 import logging
+import os
 import time
 import uuid
-import os
-
 from contextlib import asynccontextmanager
 
-from api import analytics, auth, chunks, compare, evaluations, ingest, pipelines, query, runs, admin
+from api import admin, analytics, auth, chunks, compare, evaluations, ingest, pipelines, query, runs
 from api.finetune import router as finetune_router
 from arq import create_pool
 from arq.connections import RedisSettings

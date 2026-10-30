@@ -2,14 +2,13 @@ import asyncio
 import logging
 
 import main  # noqa: F401  (sets up OpenTelemetry tracing)
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from arq.connections import RedisSettings
 from arq.worker import run_worker
 from config import get_settings
 from db import pool
-from prometheus_client import start_http_server
-
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from jobs.retention import run_retention
+from prometheus_client import start_http_server
 
 from evaluation.judge import EvaluationJudge, consume_forever
 from pipelines.finetuning.job_manager import poll_finetune_job

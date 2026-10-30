@@ -1,59 +1,156 @@
-# NeuroFlow-HiDevs
+# NeuroFlow
 
-NeuroFlow is a Retrieval-Augmented Generation (RAG) platform. Users upload documents, ask questions, and receive streamed answers grounded in their own data. Every answer is scored automatically for quality, and the best answers are later used to fine-tune the models.
+NeuroFlow is a multi-modal retrieval-augmented generation (RAG) platform: it ingests PDFs, Word files, CSVs,
+images and URLs, answers questions with cited, streamed responses, and scores every answer automatically.
+High-quality answers feed a fine-tuning pipeline tracked in MLflow, so evaluation drives model improvement.
 
-**Current status:** Task 1, system design. This repository contains the architecture, API contracts, data models, and technology decisions. No production code has been written yet.
+## Architecture
 
-## System at a Glance
-
-NeuroFlow is made of five subsystems:
-
-| Subsystem | What it does |
-|---|---|
-| Ingestion | Accepts PDF, DOCX, images, CSV, and web URLs. Extracts content, chunks it, embeds it, and stores it in the vector store. |
-| Retrieval | Runs vector, keyword, and metadata search in parallel, fuses results with Reciprocal Rank Fusion, and reranks with a cross-encoder. |
-| Generation | Builds the prompt, routes to the right LLM, streams the answer over SSE, and logs the full input and output. |
-| Evaluation | Scores every generation asynchronously on faithfulness, answer relevance, context precision, and context recall. |
-| Fine-Tuning | Selects high-quality examples from the evaluation log, builds training data, runs fine-tuning jobs tracked in MLflow, and routes queries to the fine-tuned model only when it beats the base model. |
-
-## Documentation
-
-| Document | Contents |
-|---|---|
-| [docs/architecture.md](docs/architecture.md) | The five subsystems, each with a data flow diagram |
-| [docs/api-contracts.md](docs/api-contracts.md) | The full REST API: 13 endpoints with schemas, errors, authentication, and rate limits |
-| [docs/data-models.md](docs/data-models.md) | The Postgres tables and how they relate |
-| [docs/adr/001-vector-store.md](docs/adr/001-vector-store.md) | Why pgvector for the vector store |
-| [docs/adr/002-chunking-strategy.md](docs/adr/002-chunking-strategy.md) | Fixed-size vs sentence-boundary vs semantic chunking, and when to switch |
-| [docs/adr/003-evaluation-framework.md](docs/adr/003-evaluation-framework.md) | Why LLM-as-judge evaluation, its failure modes, and how they are detected |
-
-## Key Technology Decisions
-
-- **Postgres with pgvector** holds documents, vectors, queries, evaluations, and fine-tuning jobs in one database.
-- **Hybrid retrieval:** vector search and Postgres full-text search, combined with Reciprocal Rank Fusion, then reranked.
-- **Sentence-boundary chunking** by default (512 tokens, 64 overlap), configurable per pipeline.
-- **Server-Sent Events (SSE)** for token-by-token streaming of answers.
-- **Redis job queue** so ingestion and evaluation run in the background.
-- **MLflow** for tracking fine-tuning experiments.
-
-## Repository Structure
-
-```
-NeuroFlow-HiDevs/
-├── backend/        # API and subsystem services (to be implemented)
-├── frontend/       # User interface (to be implemented)
-├── pipelines/      # Pipeline configurations and workflows
-├── evaluation/     # Evaluation and judge code
-├── infra/          # Deployment and infrastructure
-├── docs/           # Architecture, API contracts, data models, ADRs
-├── .gitignore
-└── README.md
+```mermaid
+flowchart LR
+  UI[Next.js dashboard / Python SDK] -->|JWT| API[FastAPI API]
+  API --> Q[(Redis: queue, cache, rate limits, circuit state)]
+  Q --> W[arq worker: ingestion, evaluation, fine-tune polling]
+  API --> PG[(Postgres + pgvector)]
+  W --> PG
+  API --> LLM[LLM providers: OpenAI / Anthropic]
+  W --> LLM
+  W --> ML[MLflow]
+  API -.traces.-> J[Jaeger]
+  API -.metrics.-> P[Prometheus] --> G[Grafana]
 ```
 
-## Branches
+- **API (FastAPI):** authentication, validation, query orchestration, SSE streaming.
+- **Worker (arq):** document ingestion, asynchronous evaluation, fine-tuning job polling, daily data retention.
+- **Postgres + pgvector:** documents, chunks (HNSW vector index + full-text index), runs, evaluations, pipelines.
+- **Redis:** job queue, embedding cache, rate limits, circuit breaker state, model router config, pub/sub.
+- **MLflow:** fine-tuning experiments and model registry.
+- **Observability:** OpenTelemetry traces in Jaeger, Prometheus metrics, two Grafana dashboards.
 
-| Branch | Purpose |
-|---|---|
-| `main` | Stable base with the repository structure |
-| `task-31` | Task 1 deliverables: architecture, API contracts, data models, and ADRs |
+## Key features
 
+- **Multi-modal ingestion:** PDF, DOCX, CSV, TXT, images (OCR/vision) and URLs
+  - Fixed-size, semantic and hierarchical chunking, selected automatically by document type
+  - Content-hash deduplication; MIME type and magic-byte validation; SSRF-safe URL fetching
+- **Hybrid retrieval:** dense (pgvector HNSW) + sparse (Postgres full-text) + metadata search
+  - Reciprocal rank fusion with tunable `rrf_k`, cross-encoder reranking, query expansion and type classification
+  - Per-pipeline config (`dense_k`, `sparse_k`, `top_k_after_rerank`, `ef_search`), versioned and A/B comparable
+- **Generation:** cited answers (`[Source N]`), token streaming over SSE, per-query-type prompts
+- **Automated evaluation:** faithfulness, answer relevance, context precision, context recall, weighted overall score
+  - Runs asynchronously after each answer; live feed in the dashboard; heuristic fallback when no LLM key is set
+- **Fine-tuning loop:** training-pair extraction with quality, citation and PII filters, JSONL export,
+  MLflow run per job, OpenAI job polling, automatic router registration
+- **Resilience:** Redis-backed circuit breakers, token-bucket rate limiting, queue backpressure, per-task timeouts
+- **Security:** JWT with scopes, HTML sanitization, two-layer prompt-injection defense, secret redaction before embedding
+- **Observability:** spans for every pipeline stage, custom Prometheus metrics, alert rules, runbook
+- **Tooling:** Python SDK, OpenAPI docs, GitHub Actions CI, unit/integration/load tests, retrieval benchmark
+
+## Quality metrics
+
+Measured with `evaluation/measure.py`. **Caveat:** this run used only 4 questions on a small corpus with fake
+embeddings and a heuristic judge, so retrieval numbers are not meaningful. The sprint to hit all targets with a
+real corpus was not completed (see limitations).
+
+| Metric | Target | Measured |
+|---|---|---|
+| Faithfulness | > 0.78 | 0.84 |
+| Answer relevance | > 0.75 | 0.77 |
+| Context precision | > 0.72 | 0.43 (below target) |
+| Context recall | n/a | 1.00 |
+| Overall score | > 0.75 | 0.76 |
+| P95 query latency | < 4 s | 6.7 s (below target) |
+| Hit Rate@10 / MRR@10 | > 0.80 / > 0.60 | 1.0 / 1.0 on 4 questions, not reliable |
+
+## Tech stack
+
+| Component | Technology | Why |
+|---|---|---|
+| API | FastAPI, asyncpg | Async I/O, OpenAPI for free, SSE support |
+| Database | Postgres 16 + pgvector | One store for relational data, vectors and full-text search |
+| Queue / cache | Redis 7 + arq | Simple async job queue plus cache, rate limits and breaker state |
+| Tracking | MLflow | Experiment tracking and model registry for fine-tuning |
+| Tracing / metrics | OpenTelemetry, Jaeger, Prometheus, Grafana | Standard, vendor-neutral observability |
+| Frontend | Next.js 16, Tailwind, Recharts, Monaco | Playground, pipeline manager, live evaluation feed |
+| Auth | JWT (python-jose) | Stateless, scope-based authorization |
+| Packaging | Docker, Compose, Nginx | Reproducible runs, non-root hardened images |
+| CI | GitHub Actions, ruff, mypy, pytest, Locust | Lint, tests, security scans, load tests |
+
+## Quick start
+
+```bash
+git clone https://github.com/abhinavshukla18/NeuroFlow-HiDevs.git
+cd NeuroFlow-HiDevs
+cp .env.example .env            # then fill in the secrets (see Configuration)
+docker compose -f infra/docker-compose.yml --env-file .env up -d --build
+curl http://localhost:8000/health
+cd frontend && npm install && npm run dev      # dashboard at http://localhost:3000/login
+```
+
+Generate each secret with `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
+API docs: http://localhost:8000/docs · Jaeger: :16686 · Grafana: :3001 · MLflow: :5000 · Prometheus: :9090.
+
+## API reference
+
+Scopes: **none** (public), **any** (valid token), **query**, **ingest**, **admin**.
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| POST | /auth/token | none | Exchange client credentials for a JWT |
+| POST | /ingest | ingest | Upload a file or URL for ingestion |
+| GET | /documents, /documents/{id} | any | List documents / poll status |
+| GET | /documents/{id}/chunks, /chunks/{id}, /chunks/{id}/similar | query | Inspect chunks, find similar chunks |
+| POST | /query | query | Run a RAG query (blocking or streaming) |
+| GET | /query/{run_id}/stream | query | Stream the answer over SSE |
+| PATCH | /runs/{run_id}/rating | query | Rate an answer 1 to 5 |
+| GET | /evaluations, /evaluations/{run_id}, /evaluations/stream | query | Evaluation results and live feed |
+| POST / GET | /pipelines | admin / any | Create / list pipelines |
+| GET | /pipelines/{id} | any | Get a pipeline |
+| PATCH / DELETE | /pipelines/{id} | admin | Update (new version) / archive |
+| POST | /pipelines/compare | query | A/B compare two pipelines |
+| GET | /pipelines/{id}/runs, /pipelines/{id}/analytics | query | Run history, latency and cost analytics |
+| POST / GET | /finetune/jobs, /finetune/jobs/{id} | admin | Start / inspect fine-tuning jobs |
+| GET | /finetune/training-data/preview | admin | Preview extractable training pairs |
+| POST | /admin/circuit-breaker/reset | admin | Close a circuit breaker |
+| GET | /health, /metrics | none | Health status, Prometheus metrics |
+
+## SDK usage
+
+```python
+import asyncio
+from neuroflow import NeuroFlowClient
+
+async def main():
+    async with NeuroFlowClient("http://localhost:8000", "admin-client:YOUR_SECRET") as nf:
+        doc = await nf.ingest_file("paper.pdf")               # waits until ingestion completes
+        print(doc.filename, doc.chunk_count)
+        pipeline = (await nf.list_pipelines())[0]["id"]
+        async for token in nf.query("What is the main idea?", pipeline, stream=True):
+            print(token, end="", flush=True)                  # tokens arrive progressively
+        print(await nf.get_evaluation(nf.last_run_id))        # quality scores
+
+asyncio.run(main())
+```
+
+Install with `pip install ./sdk`.
+
+## Configuration
+
+See [`.env.example`](.env.example). **Required:** `POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `JWT_SECRET`,
+`ADMIN_CLIENT_SECRET`, `QUERY_CLIENT_SECRET`. **Optional:** `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` (without a key a
+fake provider and fake embeddings are used), `OTEL_EXPORTER_OTLP_ENDPOINT`, `CORS_ORIGINS`, `DISABLE_RATE_LIMIT`.
+
+## Known limitations
+
+- **Not deployed.** `docs/deployment.md` has the Railway steps and rollback procedure, but the live deployment and
+  its verification table were not completed, so there is no live URL.
+- **Production compose not verified end to end.** The hardened images and `docker-compose.prod.yml` were written
+  but never fully run, so the non-root, read-only filesystem, image-size and Nginx load-balancing checks are untested.
+- **Quality targets not demonstrated.** The sprint scripts, an embedding cache, tunable `ef_search`/`rrf_k` and a
+  prompt A/B script exist, but the final numbers on a real corpus were not collected. Context precision (0.43) and
+  P95 latency (6.7 s) were below target in the only baseline run.
+- **Linting is lenient** (`ruff` rules E/F/I, mypy non-strict).
+- **Not implemented:** container sandboxing of document extraction, chaos tests, preview environments,
+  semantic-release automation, the Retrieval Inspector view.
+- **Streaming auth** accepts the token as a query parameter for browser `EventSource`; short-lived stream tickets would be safer.
+
+**Next:** a real staging deployment, a proper evaluation corpus with real embeddings, then rerun the quality sprint.
