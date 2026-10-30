@@ -1,0 +1,14 @@
+{
+  "metric": "faithfulness",
+  "examples": 30,
+  "judge": "heuristic-fallback (no LLM API key available)",
+  "pearson_correlation": 1.0,
+  "threshold": 0.85,
+  "passed": true,
+  "mean_auto_score_by_kind": {
+    "faithful": 1.0,
+    "partial": 0.5,
+    "unfaithful": 0.0
+  },
+  "note": "Examples are synthetic, written with human faithfulness scores equal to supported claims over total claims. This is a smoke test of the judge, not a measure of real-world judge quality."
+}

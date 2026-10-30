@@ -1,0 +1,129 @@
+import asyncio
+import json
+import time
+
+from opentelemetry import trace
+
+from config import get_settings
+from db.pool import get_pool
+from monitoring.metrics import retrieval_latency
+from pipelines.ingestion.pipeline import _fake_vector
+from pipelines.retrieval import RetrievalResult
+from pipelines.retrieval.fusion import reciprocal_rank_fusion
+from pipelines.retrieval.query_processor import QueryAnalysis
+
+tracer = trace.get_tracer("neuroflow.retrieval")
+COLUMNS = "c.id, c.content, c.document_id, c.metadata, d.filename"
+
+
+def _parent_attrs() -> dict:
+    attrs = getattr(trace.get_current_span(), "attributes", None) or {}
+    return {k: attrs[k] for k in ("pipeline_id", "run_id") if k in attrs}
+
+
+async def _traced(span_name: str, strategy: str, coro):
+    with tracer.start_as_current_span(span_name, attributes=_parent_attrs()) as span:
+        started = time.perf_counter()
+        results = await coro
+        span.set_attribute("chunk_count", len(results))
+        retrieval_latency.labels(strategy=strategy).observe(time.perf_counter() - started)
+        return results
+
+
+async def default_embed(texts: list[str]) -> list[list[float]]:
+    if get_settings().local_models:
+        from pipelines.local_models import local_embed
+        return await local_embed(texts)
+    if get_settings().fake_embeddings:
+        return [_fake_vector(t) for t in texts]
+    from providers.client import get_client
+    return await get_client().embed(texts)
+
+
+def _vec(v: list[float]) -> str:
+    return "[" + ",".join(map(str, v)) + "]"
+
+
+def _to_result(row, strategy: str, score: float) -> RetrievalResult:
+    metadata = row["metadata"]
+    if isinstance(metadata, str):
+        metadata = json.loads(metadata)
+    return RetrievalResult(
+        chunk_id=str(row["id"]),
+        content=row["content"],
+        score=score,
+        document_id=str(row["document_id"]),
+        source_name=row["filename"],
+        page_number=metadata.get("page_number") or metadata.get("page"),
+        metadata=metadata,
+        strategies=[strategy],
+    )
+
+
+class Retriever:
+    def __init__(self, embed=default_embed):
+        self.embed = embed
+
+    async def _dense_retrieval(self, queries: list[str], k: int, ef_search: int = 40,
+                               rrf_k: int = 60) -> list[RetrievalResult]:
+        vectors = await self.embed(queries)
+
+        async def one(vector):
+            async with get_pool().acquire() as conn:
+                async with conn.transaction():
+                    await conn.execute(f"SET LOCAL hnsw.ef_search = {int(ef_search)}")
+                    rows = await conn.fetch(
+                        f"SELECT {COLUMNS}, c.embedding <=> $1::vector AS distance "
+                        "FROM chunks c JOIN documents d ON d.id = c.document_id "
+                        "ORDER BY c.embedding <=> $1::vector LIMIT $2",
+                        _vec(vector), k,
+                    )
+            return [_to_result(r, "dense", 1.0 - float(r["distance"])) for r in rows]
+
+        lists = await asyncio.gather(*(one(v) for v in vectors))
+        return reciprocal_rank_fusion(list(lists), k=rrf_k)[:k] if len(lists) > 1 else lists[0]
+
+    async def _sparse_retrieval(self, queries: list[str], k: int, rrf_k: int = 60) -> list[RetrievalResult]:
+        async def one(text):
+            rows = await get_pool().fetch(
+                f"SELECT {COLUMNS}, "
+                "ts_rank_cd(to_tsvector('english', c.content), plainto_tsquery('english', $1)) AS rank "
+                "FROM chunks c JOIN documents d ON d.id = c.document_id "
+                "WHERE to_tsvector('english', c.content) @@ plainto_tsquery('english', $1) "
+                "ORDER BY rank DESC LIMIT $2",
+                text, k,
+            )
+            return [_to_result(r, "sparse", float(r["rank"])) for r in rows]
+
+        lists = await asyncio.gather(*(one(q) for q in queries))
+        return reciprocal_rank_fusion(list(lists), k=rrf_k)[:k] if len(lists) > 1 else lists[0]
+
+    async def _metadata_retrieval(self, query: str, filters: dict, k: int) -> list[RetrievalResult]:
+        if not filters:
+            return []
+        (vector,) = await self.embed([query])
+        rows = await get_pool().fetch(
+            f"SELECT {COLUMNS}, c.embedding <=> $2::vector AS distance "
+            "FROM chunks c JOIN documents d ON d.id = c.document_id "
+            "WHERE c.metadata @> $1::jsonb ORDER BY c.embedding <=> $2::vector LIMIT $3",
+            json.dumps(filters), _vec(vector), k,
+        )
+        return [_to_result(r, "metadata", 1.0 - float(r["distance"])) for r in rows]
+
+    async def retrieve(self, analysis: QueryAnalysis, k: int = 20, dense_k: int | None = None,
+                       sparse_k: int | None = None, ef_search: int = 40,
+                       rrf_k: int = 60) -> list[RetrievalResult]:
+        queries = analysis.all_queries
+        results = await asyncio.gather(
+            _traced("retrieval.dense", "dense",
+                    self._dense_retrieval(queries, dense_k or k, ef_search, rrf_k)),
+            _traced("retrieval.sparse", "sparse", self._sparse_retrieval(queries, sparse_k or k, rrf_k)),
+            _traced("retrieval.metadata", "metadata",
+                    self._metadata_retrieval(analysis.original, analysis.filters, k)),
+        )
+        with tracer.start_as_current_span("retrieval.fusion", attributes=_parent_attrs()) as span:
+            started = time.perf_counter()
+            fused = reciprocal_rank_fusion([r for r in results if r], k=rrf_k)
+            span.set_attribute("chunk_count", len(fused))
+            retrieval_latency.labels(strategy="fusion").observe(time.perf_counter() - started)
+            return fused

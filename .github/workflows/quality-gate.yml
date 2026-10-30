@@ -1,0 +1,33 @@
+name: quality-gate
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+jobs:
+  quality-check:
+    # Runs only once a staging environment is configured (repo variable STAGING_URL).
+    if: ${{ vars.STAGING_URL != '' }}
+    runs-on: ubuntu-latest
+    env:
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install -r backend/requirements.txt
+      - name: Check retrieval benchmark
+        run: |
+          python evaluation/retrieval_eval.py --env staging
+          python -c "
+          import json
+          results = json.load(open('evaluation/retrieval_results.json'))
+          assert results['mrr'] >= 0.55, f'MRR {results[\"mrr\"]} below threshold 0.55'
+          "
+      - name: Notify on failure
+        if: ${{ failure() && env.SLACK_WEBHOOK_URL != '' }}
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: '{"text": "NeuroFlow quality gate failed!"}'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
