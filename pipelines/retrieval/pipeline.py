@@ -39,7 +39,12 @@ class RetrievalPipeline:
                 analysis.expansions = []
             if not retrieval.metadata_filters_enabled:
                 analysis.filters = {}
-        fused = await self.retriever.retrieve(analysis, k=per_strategy, dense_k=dense_k, sparse_k=sparse_k)
+        extra = {}
+        if retrieval is not None:
+            extra = {"ef_search": retrieval.ef_search, "rrf_k": retrieval.rrf_k}
+        fused = await self.retriever.retrieve(
+            analysis, k=per_strategy, dense_k=dense_k, sparse_k=sparse_k, **extra
+        )
         return analysis, fused
 
     async def retrieve(

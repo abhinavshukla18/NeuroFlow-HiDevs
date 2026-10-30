@@ -64,22 +64,26 @@ class Retriever:
     def __init__(self, embed=default_embed):
         self.embed = embed
 
-    async def _dense_retrieval(self, queries: list[str], k: int) -> list[RetrievalResult]:
+    async def _dense_retrieval(self, queries: list[str], k: int, ef_search: int = 40,
+                               rrf_k: int = 60) -> list[RetrievalResult]:
         vectors = await self.embed(queries)
 
         async def one(vector):
-            rows = await get_pool().fetch(
-                f"SELECT {COLUMNS}, c.embedding <=> $1::vector AS distance "
-                "FROM chunks c JOIN documents d ON d.id = c.document_id "
-                "ORDER BY c.embedding <=> $1::vector LIMIT $2",
-                _vec(vector), k,
-            )
+            async with get_pool().acquire() as conn:
+                async with conn.transaction():
+                    await conn.execute(f"SET LOCAL hnsw.ef_search = {int(ef_search)}")
+                    rows = await conn.fetch(
+                        f"SELECT {COLUMNS}, c.embedding <=> $1::vector AS distance "
+                        "FROM chunks c JOIN documents d ON d.id = c.document_id "
+                        "ORDER BY c.embedding <=> $1::vector LIMIT $2",
+                        _vec(vector), k,
+                    )
             return [_to_result(r, "dense", 1.0 - float(r["distance"])) for r in rows]
 
         lists = await asyncio.gather(*(one(v) for v in vectors))
-        return reciprocal_rank_fusion(list(lists))[:k] if len(lists) > 1 else lists[0]
+        return reciprocal_rank_fusion(list(lists), k=rrf_k)[:k] if len(lists) > 1 else lists[0]
 
-    async def _sparse_retrieval(self, queries: list[str], k: int) -> list[RetrievalResult]:
+    async def _sparse_retrieval(self, queries: list[str], k: int, rrf_k: int = 60) -> list[RetrievalResult]:
         async def one(text):
             rows = await get_pool().fetch(
                 f"SELECT {COLUMNS}, "
@@ -92,7 +96,7 @@ class Retriever:
             return [_to_result(r, "sparse", float(r["rank"])) for r in rows]
 
         lists = await asyncio.gather(*(one(q) for q in queries))
-        return reciprocal_rank_fusion(list(lists))[:k] if len(lists) > 1 else lists[0]
+        return reciprocal_rank_fusion(list(lists), k=rrf_k)[:k] if len(lists) > 1 else lists[0]
 
     async def _metadata_retrieval(self, query: str, filters: dict, k: int) -> list[RetrievalResult]:
         if not filters:
@@ -107,17 +111,19 @@ class Retriever:
         return [_to_result(r, "metadata", 1.0 - float(r["distance"])) for r in rows]
 
     async def retrieve(self, analysis: QueryAnalysis, k: int = 20, dense_k: int | None = None,
-                       sparse_k: int | None = None) -> list[RetrievalResult]:
+                       sparse_k: int | None = None, ef_search: int = 40,
+                       rrf_k: int = 60) -> list[RetrievalResult]:
         queries = analysis.all_queries
         results = await asyncio.gather(
-            _traced("retrieval.dense", "dense", self._dense_retrieval(queries, dense_k or k)),
-            _traced("retrieval.sparse", "sparse", self._sparse_retrieval(queries, sparse_k or k)),
+            _traced("retrieval.dense", "dense",
+                    self._dense_retrieval(queries, dense_k or k, ef_search, rrf_k)),
+            _traced("retrieval.sparse", "sparse", self._sparse_retrieval(queries, sparse_k or k, rrf_k)),
             _traced("retrieval.metadata", "metadata",
                     self._metadata_retrieval(analysis.original, analysis.filters, k)),
         )
         with tracer.start_as_current_span("retrieval.fusion", attributes=_parent_attrs()) as span:
             started = time.perf_counter()
-            fused = reciprocal_rank_fusion([r for r in results if r])
+            fused = reciprocal_rank_fusion([r for r in results if r], k=rrf_k)
             span.set_attribute("chunk_count", len(fused))
             retrieval_latency.labels(strategy="fusion").observe(time.perf_counter() - started)
             return fused

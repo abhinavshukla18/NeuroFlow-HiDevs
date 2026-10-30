@@ -21,6 +21,8 @@ class RetrievalConfig(Strict):
     top_k_after_rerank: int = Field(10, ge=1, le=50)
     query_expansion: bool = True
     metadata_filters_enabled: bool = True
+    ef_search: int = Field(40, ge=10, le=400)
+    rrf_k: int = Field(60, ge=1, le=200)
 
 
 class ModelRouting(Strict):

@@ -1,3 +1,6 @@
+import hashlib
+import json
+
 from config import Settings, get_settings
 from monitoring.metrics import llm_cost, lm_calls_total
 from opentelemetry import trace
@@ -75,23 +78,37 @@ class NeuroFlowClient:
     async def embed(self, texts: list[str]) -> list[list[float]]:
         cfg = await self.router.select(RoutingCriteria(task_type="embedding"))
         provider = self._provider(cfg)
+        keys = [f"embcache:{cfg.model}:{hashlib.sha256(t.encode()).hexdigest()}" for t in texts]
+        cached = await self.redis.mget(keys) if keys else []
+        result = [json.loads(c) if c else None for c in cached]
+        missing = [i for i, v in enumerate(result) if v is None]
+        if not missing:
+            return result  # type: ignore[return-value]
 
+        todo = [texts[i] for i in missing]
         with tracer.start_as_current_span("llm.embed") as span:
             if cfg.provider == "openai":
                 await acquire_llm_token("openai")
             async with circuit_breaker(cfg.provider):
-                vectors = await with_timeout("embedding", provider.embed(texts))
-            approx_tokens = sum(len(t) for t in texts) // 4  # estimate: ~4 chars per token
+                vectors = await with_timeout("embedding", provider.embed(todo))
+            approx_tokens = sum(len(t) for t in todo) // 4  # estimate: ~4 chars per token
             cost = approx_tokens * cfg.input_price / 1_000_000
             span.set_attribute("model", cfg.model)
             span.set_attribute("input_tokens", approx_tokens)
             span.set_attribute("output_tokens", 0)
             span.set_attribute("cost_usd", cost)
+            span.set_attribute("cache_hits", len(texts) - len(missing))
+
+        pipe = self.redis.pipeline()
+        for i, vec in zip(missing, vectors):
+            result[i] = vec
+            pipe.set(keys[i], json.dumps(vec), ex=7 * 86400)
+        await pipe.execute()
 
         lm_calls_total.labels(provider=cfg.provider, model=cfg.model, task_type="embedding").inc()
         llm_cost.labels(model=cfg.model).observe(cost)
         await self._record(cfg.model, cost)
-        return vectors
+        return result  # type: ignore[return-value]
 
 
 _client: NeuroFlowClient | None = None

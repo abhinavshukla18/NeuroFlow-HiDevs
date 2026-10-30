@@ -18,6 +18,8 @@ from pipelines.ingestion.extractors.docx_extractor import extract_docx
 from pipelines.ingestion.extractors.image_extractor import extract_image
 from pipelines.ingestion.extractors.pdf_extractor import extract_pdf
 from pipelines.ingestion.extractors.url_extractor import extract_url
+from security.prompt_injection import detect_injection
+from security.secret_detector import redact_secrets
 
 logger = logging.getLogger("neuroflow.ingestion")
 tracer = trace.get_tracer("neuroflow.ingestion")
@@ -68,6 +70,7 @@ async def process_document(document_id: str, file_path: str, source_type: str) -
         from providers.client import get_client
         return await get_client().embed(texts)
 
+
     with tracer.start_as_current_span("ingestion.process", attributes=attrs) as span:
         try:
             await pool.execute("UPDATE documents SET status = 'processing' WHERE id = $1", document_id)
@@ -83,6 +86,14 @@ async def process_document(document_id: str, file_path: str, source_type: str) -
                 chunks = await chunk_document(pages, source_type, embed=embed)
                 sp.set_attribute("chunk_count", len(chunks))
                 sp.set_attribute("token_count", sum(c.token_count for c in chunks))
+
+            for c in chunks:
+                c.content, secrets_found = redact_secrets(c.content)
+                for kind in secrets_found:
+                    logger.warning(json.dumps({"event": "secret_redacted", "document_id": document_id, "pattern_type": kind}))
+                flag = detect_injection(c.content)
+                if flag:
+                    c.metadata.update(flag)
 
             with tracer.start_as_current_span("ingestion.embed", attributes=attrs) as sp:
                 vectors: list[list[float]] = []

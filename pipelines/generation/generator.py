@@ -92,6 +92,20 @@ def _public_citation(c: dict) -> dict:
     return out
 
 
+async def _stream_llm(provider, messages, temperature, model, root_ctx, pipeline_id, run_id, sink):
+    """Streams tokens into sink (a list) and yields them; records the llm_call span."""
+    span = tracer.start_span("generation.llm_call", context=root_ctx)
+    span.set_attribute("pipeline_id", pipeline_id)
+    span.set_attribute("run_id", run_id)
+    span.set_attribute("model", model)
+    try:
+        async for tok in provider.stream(messages, temperature=temperature):
+            sink.append(tok)
+            yield tok
+    finally:
+        span.end()
+
+
 async def run_events(run_id: str) -> AsyncGenerator[dict, None]:
     pool = get_pool()
     row = await pool.fetchrow(
@@ -150,24 +164,71 @@ async def run_events(run_id: str) -> AsyncGenerator[dict, None]:
         gen_started = time.perf_counter()
         parts: list[str] = []
 
-        llm_span = tracer.start_span("generation.llm_call", context=root_ctx)
-        llm_span.set_attribute("pipeline_id", pipeline_id)
-        llm_span.set_attribute("run_id", run_id)
-        llm_span.set_attribute("model", model)
-        try:
-            async for tok in provider.stream(messages, temperature=config.generation.temperature):
-                parts.append(tok)
-                yield {"type": "token", "delta": tok}
-            response = "".join(parts)
-            generation_ms = round((time.perf_counter() - gen_started) * 1000)
-            in_tok, out_tok = count_tokens(prompt_text), count_tokens(response)
-            in_price, out_price = PRICES.get(model, (0, 0))
-            cost = (in_tok * in_price + out_tok * out_price) / 1_000_000
-            llm_span.set_attribute("input_tokens", in_tok)
-            llm_span.set_attribute("output_tokens", out_tok)
-            llm_span.set_attribute("cost_usd", cost)
-            llm_span.set_attribute("latency_ms", generation_ms)
-        finally:
-            llm_span.end()
+        async for tok in _stream_llm(
+            provider, messages, config.generation.temperature, model, root_ctx, pipeline_id, run_id, parts
+        ):
+            yield {"type": "token", "delta": tok}
+
+        response = "".join(parts)
+        generation_ms = round((time.perf_counter() - gen_started) * 1000)
+        in_tok, out_tok = count_tokens(prompt_text), count_tokens(response)
+        in_price, out_price = PRICES.get(model, (0, 0))
+        cost = (in_tok * in_price + out_tok * out_price) / 1_000_000
 
         generation_latency.labels(model=model).observe(generation_ms / 1000)
+        llm_cost.labels(model=model).observe(cost)
+        lm_calls_total.labels(provider=provider_name, model=model, task_type="generation").inc()
+
+        with tracer.start_as_current_span("generation.citation_parse", context=root_ctx) as sp:
+            sp.set_attribute("pipeline_id", pipeline_id)
+            sp.set_attribute("run_id", run_id)
+            citations = [c.to_dict() for c in parse_citations(response, ctx.chunks_used)]
+            sp.set_attribute("citation_count", len(citations))
+
+        latency_ms = round((time.perf_counter() - started) * 1000)
+        with tracer.start_as_current_span("generation.log_run", context=root_ctx) as sp:
+            sp.set_attribute("pipeline_id", pipeline_id)
+            sp.set_attribute("run_id", run_id)
+            sp.set_attribute("latency_ms", latency_ms)
+            await pool.execute(
+                "UPDATE pipeline_runs SET generation = $2, input_tokens = $3, output_tokens = $4, "
+                "model_used = $5, latency_ms = $6, status = 'complete', metadata = metadata || $7::jsonb WHERE id = $1",
+                run_id, response, in_tok, out_tok, model, latency_ms,
+                json.dumps({"citations": citations, "generation_latency_ms": generation_ms}),
+            )
+            if config.evaluation.auto_evaluate:
+                _enqueue_evaluation(run_id)  # not awaited: generation never waits on evaluation
+
+        root.set_attribute("model", model)
+        root.set_attribute("chunk_count", len(ctx.chunks_used))
+        root.set_attribute("latency_ms", latency_ms)
+        queries_total.labels(pipeline_id=pipeline_id, status="success").inc()
+        logger.info(json.dumps({"event": "generation_complete", "run_id": run_id, "latency_ms": latency_ms}))
+        yield {"type": "done", "run_id": run_id, "citations": [_public_citation(c) for c in citations]}
+
+    except Exception as exc:
+        logger.exception("Generation failed for %s", run_id)
+        root.record_exception(exc)
+        queries_total.labels(pipeline_id=pipeline_id, status="error").inc()
+        await pool.execute(
+            "UPDATE pipeline_runs SET status = 'failed', "
+            "metadata = metadata || jsonb_build_object('error', $2::text) WHERE id = $1",
+            run_id, str(exc)[:500],
+        )
+        yield {"type": "error", "message": str(exc)}
+    finally:
+        root.end()
+
+
+async def generate_full(run_id: str) -> dict:
+    response, done, error = [], None, None
+    async for event in run_events(run_id):
+        if event["type"] == "token":
+            response.append(event["delta"])
+        elif event["type"] == "done":
+            done = event
+        elif event["type"] == "error":
+            error = event["message"]
+    if error:
+        return {"run_id": run_id, "status": "failed", "error": error}
+    return {"run_id": run_id, "status": "complete", "response": "".join(response), "citations": done["citations"]}
